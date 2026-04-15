@@ -22,4 +22,5 @@ class NewsAiArticle extends Model
     {
         return $this->belongsTo(News::class);
     }
+
 }

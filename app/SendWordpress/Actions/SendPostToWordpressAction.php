@@ -19,7 +19,7 @@ class SendPostToWordpressAction
         $success = 0;
         $failed = 0;
 
-        $items = NewsAiArticle::query()
+        $items = NewsAiArticle::with('news')
             ->where('sent_wordpress', false)
             ->whereNotNull('body_html')
             ->orderBy('id')
@@ -37,11 +37,16 @@ class SendPostToWordpressAction
                     default => 'draft'
                 };
 
+                $categoryName = $article->news->category ?? 'General';
+
+                $categoryId = $this->client->getOrCreateCategory($categoryName);
+
                 $payload = [
                     'title'   => $article->generated_title ?? $article->source_title,
                     'content' => $article->body_html,
                     'excerpt' => $article->excerpt,
                     'status'  => $status,
+                    'categories' => [$categoryId],
                 ];
 
                 // ⏰ si es programado

@@ -14,7 +14,7 @@ class ScrapeNewsAction
     {
         $sources = [
             new AnimeNewsScraper(),
-            new EsquinaAnimeScraper(),
+            //new EsquinaAnimeScraper(),
         ];
 
         $saved = [];
@@ -32,7 +32,7 @@ class ScrapeNewsAction
                             'title' => $item->title,
                             'image' => $item->image ?? null,
                             'source' => $item->source, // 👈 CLAVE
-                            'content' => $item->content ?? null,
+                            'category' => $item->category ?? null,
                         ]
                     );
 

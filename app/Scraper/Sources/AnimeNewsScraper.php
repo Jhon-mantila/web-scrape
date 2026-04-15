@@ -8,6 +8,7 @@ use App\Scraper\Contracts\ScraperInterface;
 use App\Scraper\Services\BaseScraper;
 use App\Scraper\DTO\NewsDTO;
 use Symfony\Component\DomCrawler\Crawler;
+use Illuminate\Support\Facades\Log;
 
 class AnimeNewsScraper extends BaseScraper implements ScraperInterface
 {
@@ -33,12 +34,19 @@ class AnimeNewsScraper extends BaseScraper implements ScraperInterface
             $image = $node->filter('img')->count() 
                 ? $node->filter('img')->attr('src') 
                 : null;
+            
+                $category = $node->filter('.topics')->count() 
+                ? trim($node->filter('.topics a')->first()->text()) 
+                : null;
+          
+            //Log::info('category: ' . $category);
 
             if ($title && $url) {
                 $news[] = new NewsDTO(
                     title: $title,
                     url: $url,
-                    source: 'anime_news'
+                    source: 'anime_news',
+                    category: $category
 
                 );
             }

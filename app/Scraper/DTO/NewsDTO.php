@@ -10,5 +10,6 @@ class NewsDTO
         public string $source,
         public ?string $image = null,
         public ?string $description = null,
+        public ?string $category = null,
     ) {}
 }
