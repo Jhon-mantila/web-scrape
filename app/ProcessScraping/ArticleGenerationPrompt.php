@@ -67,6 +67,22 @@ TXT;
         - No uses <html>, <body>, ni <h1> (el título del post se define aparte).
         - Mantén nombres de obras, personajes y estudios tal como en la fuente.
 
+        REGLAS DE USO DEL CONTENIDO (CRÍTICO):
+        - Si el contenido de referencia es AMPLIO o DETALLADO:
+        - Debes cubrir la MAYORÍA de los puntos relevantes.
+        - No resumas en exceso.
+        - Expande la información en múltiples párrafos y subtítulos.
+        - Incluye todos los datos importantes (fechas, anuncios, contexto, personajes, etc.).
+        - El artículo debe sentirse completo, no resumido.
+
+        - Si el contenido de referencia es CORTO o LIMITADO:
+        - Usa TODO el contenido disponible sin omitir información.
+        - Puedes ampliar ligeramente con redacción natural, pero SIN inventar datos.
+        - Mantén el artículo breve pero informativo.
+
+        - Nunca ignores información relevante del contenido.
+        - Prioriza SIEMPRE aprovechar el contenido disponible antes que acortar.
+
         Responde SOLO en formato JSON válido.
 
         Estructura obligatoria:
