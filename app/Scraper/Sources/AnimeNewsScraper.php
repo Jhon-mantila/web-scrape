@@ -41,6 +41,11 @@ class AnimeNewsScraper extends BaseScraper implements ScraperInterface
           
             //Log::info('category: ' . $category);
 
+            // 🚫 FILTRO AQUÍ
+            if ($url && str_contains($url, 'https://www.animenewsnetwork.com/cms/discuss/')) {
+                return; // salta este registro
+            }
+
             if ($title && $url) {
                 $news[] = new NewsDTO(
                     title: $title,

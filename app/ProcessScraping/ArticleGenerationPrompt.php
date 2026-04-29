@@ -7,10 +7,10 @@ class ArticleGenerationPrompt
     public static function system(): string
     {
         return <<<'TXT'
-Eres un editor de noticias especializado en anime y manga. Escribes en español neutro, claro y correcto.
-Respetas los hechos de la fuente: no inventas fechas, nombres, cifras ni citas que no aparezcan en el material.
-Tu salida sigue EXACTAMENTE el formato de secciones pedido al final del mensaje de usuario, sin texto adicional fuera de ese formato.
-TXT;
+        Eres un editor de noticias especializado en anime y manga. Escribes en español neutro, claro y correcto.
+        Respetas los hechos de la fuente: no inventas fechas, nombres, cifras ni citas que no aparezcan en el material.
+        Tu salida sigue EXACTAMENTE el formato de secciones pedido al final del mensaje de usuario, sin texto adicional fuera de ese formato.
+        TXT;
     }
 
     public static function user(
@@ -18,6 +18,7 @@ TXT;
         string $contentText,
         ?string $rawHtml = null,
         ?string $source = null,
+        array $youtubeEmbeds = [] // 👈 nuevo
     ): string {
 
         $extraInstructions = '';
@@ -45,74 +46,80 @@ TXT;
         $blocks = [
             'TÍTULO ORIGINAL:',
             $title,
-            '',
-            'CONTENIDO DE REFERENCIA (texto extraído de la noticia):',
+            '', 
+            'CONTENIDO DE REFERENCIA (texto extraído de la noticia):', 
             $contentText,
         ];
 
-        if ($rawHtml !== null && $rawHtml !== '') {
-            $blocks[] = '';
-            $blocks[] = 'HTML CRUDO ORIGINAL (solo contexto; prioriza el texto de referencia salvo que necesites comprobar estructura o nombres propios):';
-            $blocks[] = $rawHtml;
+        if ($rawHtml !== null && $rawHtml !== '') 
+        { 
+            $blocks[] = ''; 
+            $blocks[] = 'HTML CRUDO ORIGINAL (solo contexto; prioriza el texto de referencia salvo que necesites comprobar estructura o nombres propios):'; 
+            $blocks[] = $rawHtml; 
         }
-
+        if (!empty($youtubeEmbeds)) {
+            $blocks[] = '';
+            $blocks[] = 'VIDEOS DE YOUTUBE (OBLIGATORIOS):';
+        
+            foreach ($youtubeEmbeds as $embed) {
+                $blocks[] = $embed;
+            }
+        }
         $blocks[] = '';
         $blocks[] = $extraInstructions;
         $blocks[] = <<<'TXT'
-        Reescribe la información como un artículo propio para publicación web (no copies párrafos literales).
+        Reescribe la información como un artículo propio para publicación web (no copies párrafos literales). 
 
-        Requisitos del artículo:
-        - Tono informativo y agradable a la lectura; pensado para SEO sin relleno.
-        - El cuerpo debe ser HTML válido listo para pegar en WordPress: usa <p>, <h2>, <h3>, <strong>, <ul><li> cuando corresponda.
-        - No uses <html>, <body>, ni <h1> (el título del post se define aparte).
-        - Mantén nombres de obras, personajes y estudios tal como en la fuente.
-
+        Requisitos del artículo: 
+        - Tono informativo y agradable a la lectura; pensado para SEO sin relleno. 
+        - El cuerpo debe ser HTML válido listo para pegar en WordPress: usa <p>, <h2>, <h3>, <strong>, <ul><li> cuando corresponda. 
+        - No uses <html>, <body>, ni <h1> (el título del post se define aparte). 
+        - Mantén nombres de obras, personajes y estudios tal como en la fuente. 
         REGLAS DE USO DEL CONTENIDO (CRÍTICO):
-        - Si el contenido de referencia es AMPLIO o DETALLADO:
-        - Debes cubrir la MAYORÍA de los puntos relevantes.
-        - No resumas en exceso.
-        - Expande la información en múltiples párrafos y subtítulos.
-        - Incluye todos los datos importantes (fechas, anuncios, contexto, personajes, etc.).
-        - El artículo debe sentirse completo, no resumido.
 
-        - Si el contenido de referencia es CORTO o LIMITADO:
-        - Usa TODO el contenido disponible sin omitir información.
-        - Puedes ampliar ligeramente con redacción natural, pero SIN inventar datos.
-        - Mantén el artículo breve pero informativo.
+        - Si el contenido de referencia es AMPLIO o DETALLADO: 
+        - Debes cubrir la MAYORÍA de los puntos relevantes. 
+        - No resumas en exceso. 
+        - Expande la información en múltiples párrafos y subtítulos. 
+        - Incluye todos los datos importantes (fechas, anuncios, contexto, personajes, etc.). 
+        - El artículo debe sentirse completo, no resumido. 
+        - Si el contenido de referencia es CORTO o LIMITADO: 
+        - Usa TODO el contenido disponible sin omitir información. 
+        - Puedes ampliar ligeramente con redacción natural, pero SIN inventar datos. 
+        - Mantén el artículo breve pero informativo. 
+        - Nunca ignores información relevante del contenido. 
+        - Prioriza SIEMPRE aprovechar el contenido disponible antes que acortar. 
+        
+        Responde SOLO en formato JSON válido. 
 
-        - Nunca ignores información relevante del contenido.
-        - Prioriza SIEMPRE aprovechar el contenido disponible antes que acortar.
-
-        Responde SOLO en formato JSON válido.
-
-        Estructura obligatoria:
-
+        Estructura obligatoria: 
         {
-        "title": "string",
-        "excerpt": "string",
-        "html": "string (todo el HTML debe ir en UNA SOLA LÍNEA y escapado correctamente)"
+            "title": "string",
+            "excerpt": "string",
+            "html": "string (todo el HTML debe ir en UNA SOLA LÍNEA y escapado correctamente)"
         }
+        
+        - Si hay videos de YouTube:
+        - Inserta al menos uno dentro del contenido HTML usando <iframe>.
+        - Colócalo después de un <h2> relevante.
+        - No inventes videos, usa solo los proporcionados.
 
-        Reglas:
-        - "title": título optimizado SEO.
-        - "excerpt": resumen de 1–2 frases, máximo 300 caracteres, sin HTML.
-        - "html": contenido del artículo en HTML válido (<p>, <h2>, <ul>, etc.).
-        - NO agregues texto fuera del JSON.
-        - NO expliques nada.
-        - NO uses markdown.
-        - La respuesta debe ser JSON válido parseable.
-        - El campo "html" DEBE ser un string JSON válido.
-        - TODO el HTML debe estar entre comillas.
-        - NO uses saltos de línea reales dentro del HTML.
-        - Usa \n si necesitas saltos de línea.
-        - Escapa comillas internas como \".
-
-        Reglas adicionales para "title":
-        - NO repitas el título original literalmente.
-        - Mejora el título para SEO.
-        - Hazlo atractivo para clics (CTR).
-        - Usa palabras como: análisis, reseña, dónde ver, historia, personajes.
-        - Máximo 70 caracteres.
+        Reglas: - "title": título optimizado SEO. 
+        - "excerpt": resumen de 1–2 frases, máximo 300 caracteres, sin HTML. 
+        - "html": contenido del artículo en HTML válido (<p>, <h2>, <ul>, etc.). 
+        - NO agregues texto fuera del JSON. - NO expliques nada. 
+        - NO uses markdown. 
+        - La respuesta debe ser JSON válido parseable. 
+        - El campo "html" DEBE ser un string JSON válido. 
+        - TODO el HTML debe estar entre comillas. 
+        - NO uses saltos de línea reales dentro del HTML. 
+        - Usa \n si necesitas saltos de línea. - Escapa comillas internas como \". 
+        
+        Reglas adicionales para "title": 
+        - NO repitas el título original literalmente. 
+        - Mejora el título para SEO. 
+        - Hazlo atractivo para clics (CTR). 
+        - Usa palabras como: análisis, reseña, dónde ver, historia, personajes. - Máximo 70 caracteres.
         TXT;
 
         return implode("\n", $blocks);

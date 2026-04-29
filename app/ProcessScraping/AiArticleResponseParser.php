@@ -4,31 +4,39 @@ namespace App\ProcessScraping;
 
 class AiArticleResponseParser
 {
-    /**
-     * @return array{generated_title: string|null, excerpt: string|null, body_html: string|null}
-     */
     public function parse(string $raw): array
     {
+        // 1. limpiar fences
         $text = $this->stripOuterCodeFences($raw);
-        // 👇 NUEVO
-        $text = $this->fixHtmlField($text);
-        // 🔥 FIX CRÍTICO: escapar saltos de línea dentro de strings
-        $text = $this->fixBrokenJson($text);
-    
+
+        // 2. intentar extraer JSON si hay ruido
+        $text = $this->extractJson($text);
+
+        // 3. intento directo (rápido y limpio)
         $data = json_decode($text, true);
-    
+
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return $this->format($data);
+        }
+
+        // 4. fallback: arreglar JSON roto
+        $fixed = $this->fixBrokenJson($text);
+        $data = json_decode($fixed, true);
+
         if (json_last_error() !== JSON_ERROR_NONE) {
             \Log::warning('JSON inválido desde IA', [
                 'raw' => $raw,
+                'cleaned' => $text,
             ]);
-    
-            return [
-                'generated_title' => null,
-                'excerpt' => null,
-                'body_html' => null,
-            ];
+
+            return $this->empty();
         }
-    
+
+        return $this->format($data);
+    }
+
+    private function format(array $data): array
+    {
         return [
             'generated_title' => $data['title'] ?? null,
             'excerpt' => $data['excerpt'] ?? null,
@@ -36,12 +44,21 @@ class AiArticleResponseParser
         ];
     }
 
+    private function empty(): array
+    {
+        return [
+            'generated_title' => null,
+            'excerpt' => null,
+            'body_html' => null,
+        ];
+    }
+
     private function stripOuterCodeFences(string $text): string
     {
         $text = trim($text);
 
-        if (str_starts_with($text, '```')) {
-            // quitar ```json o ```
+        // elimina ```json ... ```
+        if (preg_match('/^```/', $text)) {
             $text = preg_replace('/^```[a-zA-Z0-9]*\s*/', '', $text);
             $text = preg_replace('/\s*```$/', '', $text);
         }
@@ -49,23 +66,16 @@ class AiArticleResponseParser
         return trim($text);
     }
 
-    private function fixHtmlField(string $json): string
+    private function extractJson(string $text): string
     {
-        return preg_replace_callback(
-            '/"html"\s*:\s*(<.+?>.*<\/.+?>)/s',
-            function ($matches) {
-                $html = $matches[1];
+        $start = strpos($text, '{');
+        $end = strrpos($text, '}');
 
-                // escapar comillas
-                $html = str_replace('"', '\\"', $html);
+        if ($start !== false && $end !== false && $end > $start) {
+            return substr($text, $start, $end - $start + 1);
+        }
 
-                // escapar saltos de línea
-                $html = str_replace(["\n", "\r"], '\\n', $html);
-
-                return '"html": "' . $html . '"';
-            },
-            $json
-        );
+        return $text;
     }
 
     private function fixBrokenJson(string $json): string
@@ -81,7 +91,7 @@ class AiArticleResponseParser
                 $inString = !$inString;
             }
 
-            // 🔥 si estamos dentro de string y hay salto de línea → escapar
+            // arreglar saltos de línea dentro de strings
             if ($inString && ($char === "\n" || $char === "\r")) {
                 $result .= '\\n';
                 continue;

@@ -7,6 +7,7 @@ use App\Models\NewsAiArticle;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
+use App\ProcessScraping\YoutubeExtractor;
 
 class GenerateNewsAiArticleAction
 {
@@ -61,12 +62,15 @@ class GenerateNewsAiArticleAction
                 $parts = null;
                 
                 for ($i = 0; $i < 3; $i++) {
-                
+
+                    $youtubeEmbeds = YoutubeExtractor::extract($detail->raw_html ?? null);
+
                     $prompt = ArticleGenerationPrompt::user(
                         $news->title,
                         $detail->content_text,
                         $rawHtml,
-                        $news->source
+                        $news->source,
+                        $youtubeEmbeds // 👈 nuevo parámetro
                     );
                 
                     // 🔥 segundo intento más agresivo
