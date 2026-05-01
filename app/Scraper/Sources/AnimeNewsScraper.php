@@ -20,31 +20,33 @@ class AnimeNewsScraper extends BaseScraper implements ScraperInterface
         $crawler = new Crawler($html);
 
         $news = [];
-
-        $crawler->filter('.herald.box.news')->each(function (Crawler $node) use (&$news) {
+        $that = $this;
+        $crawler->filter('.herald.box.news')->each(function (Crawler $node) use (&$news, $that) {
             
-            $title = $node->filter('h3')->count() 
-                ? trim($node->filter('h3')->text()) 
-                : null;
+            //Log::info('cantidad de noticias: ' . $crawler->filter('.herald.box.news')->count());
 
-            $url = $node->filter('a')->count() 
-                ? 'https://www.animenewsnetwork.com' . $node->filter('a')->attr('href') 
-                : null;
-
-            $image = $node->filter('img')->count() 
-                ? $node->filter('img')->attr('src') 
-                : null;
-            
-                $category = $node->filter('.topics')->count() 
-                ? trim($node->filter('.topics a')->first()->text()) 
-                : null;
-          
-            //Log::info('category: ' . $category);
+            $url = $node->filter('h3 a')->count() 
+            ? 'https://www.animenewsnetwork.com' . $node->filter('h3 a')->attr('href') 
+            : null;
 
             // 🚫 FILTRO AQUÍ
-            if ($url && str_contains($url, 'https://www.animenewsnetwork.com/cms/discuss/')) {
+            if ($url && str_contains($url, '/cms/discuss/')) {
                 return; // salta este registro
             }
+
+            $title = $node->filter('h3 a')->count() 
+                ? trim($node->filter('h3 a')->text()) 
+                : null;
+
+            /*$image = $node->filter('.thumbnail')->count()
+            ? $this->extractImageFromStyle($node->filter('.thumbnail')->attr('style'))
+            : null;*/
+            
+            $category = $node->filter('.topics a')->count() 
+            ? trim($node->filter('.topics a')->first()->text()) 
+            : null;
+          
+            //Log::info('category: ' . $category);
 
             if ($title && $url) {
                 $news[] = new NewsDTO(
