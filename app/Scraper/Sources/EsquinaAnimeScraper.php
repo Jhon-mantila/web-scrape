@@ -12,8 +12,9 @@ class EsquinaAnimeScraper extends BaseScraper implements ScraperInterface
 {
     public function scrape(): array
     {
-        $html = $this->get('https://esquinaweb.com/anime/');
+        $animeUrl = config('scraper.esquinaweb.anime_url');
 
+         $html = $this->get($animeUrl);
 
         $crawler = new Crawler($html);
 

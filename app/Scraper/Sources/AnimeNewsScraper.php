@@ -14,9 +14,11 @@ class AnimeNewsScraper extends BaseScraper implements ScraperInterface
 {
     public function scrape(): array
     {
-        $html = $this->get('https://www.animenewsnetwork.com/news/');
+        $baseUrl = config('scraper.anime_news.base_url');
+        $newsUrl = config('scraper.anime_news.news_url');
 
-    
+        $html = $this->get($newsUrl);
+
         $crawler = new Crawler($html);
 
         $news = [];
@@ -26,7 +28,7 @@ class AnimeNewsScraper extends BaseScraper implements ScraperInterface
             //Log::info('cantidad de noticias: ' . $crawler->filter('.herald.box.news')->count());
 
             $url = $node->filter('h3 a')->count() 
-            ? 'https://www.animenewsnetwork.com' . $node->filter('h3 a')->attr('href') 
+            ? $baseUrl . $node->filter('h3 a')->attr('href') 
             : null;
 
             // 🚫 FILTRO AQUÍ
