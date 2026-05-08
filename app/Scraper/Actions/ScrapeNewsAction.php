@@ -26,15 +26,27 @@ class ScrapeNewsAction
 
                 foreach ($items as $item) {
 
-                    $news = News::updateOrCreate(
-                        ['url' => $item->url],
-                        [
+                    // Evita duplicados
+                    $exists = News::where('url', $item->url)
+                        ->orWhere('title', $item->title)
+                        ->exists();
+
+                    if ($exists) {
+                        Log::info('Noticia duplicada omitida', [
                             'title' => $item->title,
-                            'image' => $item->image ?? null,
-                            'source' => $item->source, // 👈 CLAVE
-                            'category' => $item->category ?? null,
-                        ]
-                    );
+                            'url' => $item->url
+                        ]);
+
+                        continue;
+                    }
+
+                    $news = News::create([
+                        'title' => $item->title,
+                        'url' => $item->url,
+                        'image' => $item->image ?? null,
+                        'source' => $item->source,
+                        'category' => $item->category ?? null,
+                    ]);
 
                     NewsDetail::firstOrCreate(
                         ['news_id' => $news->id],
