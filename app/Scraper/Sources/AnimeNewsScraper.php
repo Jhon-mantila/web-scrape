@@ -23,7 +23,7 @@ class AnimeNewsScraper extends BaseScraper implements ScraperInterface
 
         $news = [];
         $that = $this;
-        $crawler->filter('.herald.box.news')->each(function (Crawler $node) use (&$news, $that) {
+        $crawler->filter('.herald.box.news')->each(function (Crawler $node) use (&$news, $baseUrl) {
             
             //Log::info('cantidad de noticias: ' . $crawler->filter('.herald.box.news')->count());
 
