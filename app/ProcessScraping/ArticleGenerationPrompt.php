@@ -59,7 +59,7 @@ class ArticleGenerationPrompt
         }
         if (!empty($youtubeEmbeds)) {
             $blocks[] = '';
-            $blocks[] = 'VIDEOS DE YOUTUBE (OBLIGATORIOS):';
+            $blocks[] = 'VIDEOS DE YOUTUBE DISPONIBLES (inserta al menos uno en el HTML usando <iframe>):';
         
             foreach ($youtubeEmbeds as $embed) {
                 $blocks[] = $embed;
@@ -80,7 +80,7 @@ class ArticleGenerationPrompt
         HTML para WordPress:
         - Usa <p>, <h2>, <h3>, <strong>, <ul><li> donde corresponda.
         - Sin <html>, <body> ni <h1>.
-        - Si hay videos de YouTube, inserta al menos uno con <iframe> después de un <h2> relevante.
+        - Solo inserta <iframe> de YouTube si se te proporcionaron URLs en la sección "VIDEOS DE YOUTUBE DISPONIBLES". Si no hay videos, no menciones ninguno y no inventes URLs.
 
         Responde únicamente con JSON válido:
         {
