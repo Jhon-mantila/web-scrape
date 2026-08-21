@@ -14,6 +14,19 @@ Proyecto en Laravel para:
 - phpMyAdmin (Docker)
 - Ollama (host local)
 
+### Arquitectura `app/ProcessScraping/`
+
+```
+ProcessScraping/
+├── Actions/          # Orquestación y casos de uso (pipeline, IA, imágenes)
+├── Ai/               # Cliente Ollama y parser de respuestas JSON
+├── Prompts/          # Biblioteca de prompts y clasificador de artículos
+├── Images/           # Extracción de imagen destacada
+└── Support/          # Utilidades (YouTube, etc.)
+```
+
+Fases futuras: `Research/` (SearXNG) e `Images/Generators/` (FLUX).
+
 ## Requisitos
 
 - Docker y Docker Compose
@@ -44,6 +57,27 @@ docker exec -it laravel_app php artisan migrate
 ```
 
 ## Comandos principales
+
+### Pipeline completo (recomendado)
+
+Un solo comando ejecuta: listado → detalles → imagen → IA → WordPress.
+
+```bash
+docker exec -it laravel_app php artisan migrate
+docker exec -it laravel_app php artisan storage:link
+
+docker exec -it laravel_app php artisan news:pipeline --limit=5 --mode=draft --include-raw-html --show-errors
+```
+
+Opciones útiles:
+
+```bash
+# Sin volver a scrapear el listado (solo detalles + IA + WP)
+docker exec -it laravel_app php artisan news:pipeline --limit=5 --skip-scrape --mode=draft
+
+# Reprocesar aunque ya estén marcados como procesados
+docker exec -it laravel_app php artisan news:pipeline --limit=5 --force --include-raw-html
+```
 
 ### Migrar base de datos
 
@@ -99,12 +133,23 @@ docker exec -it laravel_app php artisan config:cache
 
 ## Ollama (IA local)
 
+Modelo por defecto: **`qwen3:14b`**
+
+Variables recomendadas en `.env`:
+
+```env
+OLLAMA_URL=http://host.docker.internal:11434
+OLLAMA_MODEL=qwen3:14b
+OLLAMA_FORMAT_JSON=true
+OLLAMA_TEMPERATURE=0.75
+OLLAMA_NUM_CTX=8192
+```
+
 ### Correr modelos
 
 ```bash
-ollama run mistral
-ollama run llama3
-ollama run gemma4:e4b
+ollama pull qwen3:14b
+ollama run qwen3:14b
 ```
 
 ### Prueba local desde WSL (localhost)
@@ -138,6 +183,12 @@ Nota: idealmente usa `OLLAMA_URL=http://host.docker.internal:11434` para evitar 
 
 ## Flujo sugerido de trabajo
 
+**Opción A — un solo paso:**
+```bash
+docker exec -it laravel_app php artisan news:pipeline --limit=5 --mode=draft --include-raw-html
+```
+
+**Opción B — paso a paso (manual):**
 1. Scrape noticias base: `scrape:news`
 2. Scrape detalles: `scrape:news:details`
 3. Generar articulos con IA: `news:generate-ai`
@@ -149,4 +200,4 @@ Nota: idealmente usa `OLLAMA_URL=http://host.docker.internal:11434` para evitar 
 - CPU: Intel Core i7-12700KF
 - Motherboard: Gigabyte Z790 EAGLE AX
 - RAM: 32 GB DDR5
-- GPU: AMD Radeon RX 6600 (7.98 GB)
+- GPU: NVIDIA RTX 5070 Ti (16 GB VRAM)

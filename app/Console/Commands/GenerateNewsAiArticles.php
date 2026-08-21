@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\ProcessScraping\GenerateNewsAiArticleAction;
+use App\ProcessScraping\Actions\GenerateNewsAiArticleAction;
 use Illuminate\Console\Command;
 
 class GenerateNewsAiArticles extends Command

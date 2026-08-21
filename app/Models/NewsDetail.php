@@ -11,6 +11,7 @@ class NewsDetail extends Model
         'news_id',
         'status',
         'raw_html',
+        'featured_image_path',
         'content_text',
         'attempt_count',
         'last_error',

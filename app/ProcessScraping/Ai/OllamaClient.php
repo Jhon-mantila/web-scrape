@@ -1,6 +1,6 @@
 <?php
 
-namespace App\ProcessScraping;
+namespace App\ProcessScraping\Ai;
 
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -12,16 +12,31 @@ class OllamaClient
         $url = rtrim(config('services.ollama.url'), '/').'/api/generate';
         $model ??= config('services.ollama.model');
 
+        $payload = [
+            'model' => $model,
+            'system' => $system,
+            'prompt' => $prompt,
+            'stream' => false,
+        ];
+
+        if (config('services.ollama.format_json')) {
+            $payload['format'] = 'json';
+        }
+
+        $options = array_filter([
+            'temperature' => config('services.ollama.temperature'),
+            'num_ctx' => config('services.ollama.num_ctx'),
+        ], fn ($value) => $value !== null);
+
+        if ($options !== []) {
+            $payload['options'] = $options;
+        }
+
         try {
             $response = Http::timeout((int) config('services.ollama.timeout'))
                 ->connectTimeout(15)
                 ->acceptJson()
-                ->post($url, [
-                    'model' => $model,
-                    'system' => $system,
-                    'prompt' => $prompt,
-                    'stream' => false,
-                ]);
+                ->post($url, $payload);
         } catch (\Illuminate\Http\Client\ConnectionException $e) {
             throw new RuntimeException(
                 'No se pudo conectar con Ollama en '.$url.': '.$e->getMessage(),

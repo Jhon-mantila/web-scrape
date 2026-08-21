@@ -24,6 +24,33 @@ class WordPressClient
 
         return $response->json();
     }
+
+    public function uploadMedia(string $filePath, string $filename): array
+    {
+        $url = config('services.wordpress.url').'/wp-json/wp/v2/media';
+
+        $response = Http::withBasicAuth(
+            config('services.wordpress.user'),
+            config('services.wordpress.password')
+        )
+            ->timeout(120)
+            ->attach(
+                'file',
+                file_get_contents($filePath),
+                $filename,
+                ['Content-Type' => mime_content_type($filePath) ?: 'image/jpeg']
+            )
+            ->post($url, [
+                'title' => pathinfo($filename, PATHINFO_FILENAME),
+                'status' => 'inherit',
+            ]);
+
+        if ($response->failed()) {
+            throw new RuntimeException('Error subiendo media a WordPress: '.$response->body());
+        }
+
+        return $response->json();
+    }
     
     public function getOrCreateCategory(string $name): int
     {

@@ -16,6 +16,7 @@ class NewsAiArticle extends Model
         'sent_wordpress',
         'sent_wordpress_at',
         'model',
+        'article_type',
     ];
 
     public function news(): BelongsTo

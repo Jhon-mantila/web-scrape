@@ -37,8 +37,11 @@ return [
 
     'ollama' => [
         'url' => env('OLLAMA_URL', 'http://localhost:11434'),
-        'model' => env('OLLAMA_MODEL', 'mistral'),
+        'model' => env('OLLAMA_MODEL', 'qwen3:14b'),
         'timeout' => env('OLLAMA_TIMEOUT', 600),
+        'format_json' => env('OLLAMA_FORMAT_JSON', true),
+        'temperature' => env('OLLAMA_TEMPERATURE', 0.75),
+        'num_ctx' => env('OLLAMA_NUM_CTX', 8192),
     ],
 
     'wordpress' => [

@@ -1,6 +1,6 @@
 <?php
 
-namespace App\ProcessScraping;
+namespace App\ProcessScraping\Support;
 
 class YoutubeExtractor
 {
@@ -12,7 +12,6 @@ class YoutubeExtractor
 
         $embeds = [];
 
-        // iframes ya embedidos
         preg_match_all(
             '/<iframe[^>]+src=["\']([^"\']*youtube\.com\/embed\/[^"\']+)["\']/i',
             $html,
@@ -20,13 +19,11 @@ class YoutubeExtractor
         );
 
         foreach ($iframes[1] as $src) {
-            // limpiar parámetros de tracking como ?si=...
             $clean = preg_replace('/[?&]si=[^&]+/', '', $src);
             $clean = rtrim($clean, '?&');
             $embeds[] = $clean;
         }
 
-        // links de youtube sueltos (watch?v= o youtu.be/)
         preg_match_all(
             '/https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w\-]{11})/i',
             $html,
@@ -34,8 +31,8 @@ class YoutubeExtractor
         );
 
         foreach ($links[1] as $videoId) {
-            $embedUrl = 'https://www.youtube.com/embed/' . $videoId;
-            if (!in_array($embedUrl, $embeds)) {
+            $embedUrl = 'https://www.youtube.com/embed/'.$videoId;
+            if (! in_array($embedUrl, $embeds)) {
                 $embeds[] = $embedUrl;
             }
         }

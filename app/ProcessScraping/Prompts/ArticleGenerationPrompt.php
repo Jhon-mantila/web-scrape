@@ -1,19 +1,12 @@
 <?php
 
-namespace App\ProcessScraping;
+namespace App\ProcessScraping\Prompts;
 
 class ArticleGenerationPrompt
 {
-    public static function system(): string
+    public static function system(?string $articleType = null): string
     {
-        return <<<'TXT'
-        Eres el redactor principal de EsquinaAnime, un sitio hispanohablante para fans apasionados del anime y manga.
-        Escribes con entusiasmo genuino pero sin exagerar. Tu tono es el de alguien que creció viendo Dragon Ball y Naruto
-        y hoy sigue cada anuncio de la industria. Cuando hay buenas noticias, se nota la emoción. Cuando algo decepciona,
-        lo dices con honestidad. Siempre en español neutro, claro, sin tecnicismos innecesarios.
-        Solo usas fechas, nombres y cifras que aparezcan en el material de referencia — nunca los inventas.
-        Tu salida sigue EXACTAMENTE el formato JSON pedido al final del mensaje, sin texto adicional fuera de él.
-        TXT;
+        return PromptLibrary::system($articleType ?? 'default');
     }
 
     public static function user(
@@ -21,7 +14,8 @@ class ArticleGenerationPrompt
         string $contentText,
         ?string $rawHtml = null,
         ?string $source = null,
-        array $youtubeEmbeds = [] // 👈 nuevo
+        array $youtubeEmbeds = [],
+        ?string $articleType = null,
     ): string {
 
         $extraInstructions = '';
@@ -43,30 +37,37 @@ class ArticleGenerationPrompt
             TXT;
         }
 
+        $type = $articleType ?? 'default';
+        $toneExtra = PromptLibrary::userExtra($type);
+
         $blocks = [
             'TÍTULO ORIGINAL:',
             $title,
-            '', 
-            'CONTENIDO DE REFERENCIA (texto extraído de la noticia):', 
+            '',
+            'CONTENIDO DE REFERENCIA (texto extraído de la noticia):',
             $contentText,
         ];
 
-        if ($rawHtml !== null && $rawHtml !== '') 
-        { 
-            $blocks[] = ''; 
-            $blocks[] = 'HTML CRUDO ORIGINAL (solo contexto; prioriza el texto de referencia salvo que necesites comprobar estructura o nombres propios):'; 
-            $blocks[] = $rawHtml; 
+        if ($rawHtml !== null && $rawHtml !== '') {
+            $blocks[] = '';
+            $blocks[] = 'HTML CRUDO ORIGINAL (solo contexto; prioriza el texto de referencia salvo que necesites comprobar estructura o nombres propios):';
+            $blocks[] = $rawHtml;
         }
-        if (!empty($youtubeEmbeds)) {
+
+        if (! empty($youtubeEmbeds)) {
             $blocks[] = '';
             $blocks[] = 'VIDEOS DE YOUTUBE DISPONIBLES (inserta al menos uno en el HTML usando <iframe>):';
-        
+
             foreach ($youtubeEmbeds as $embed) {
                 $blocks[] = $embed;
             }
         }
+
         $blocks[] = '';
         $blocks[] = $extraInstructions;
+        $blocks[] = '';
+        $blocks[] = 'TIPO DE ARTÍCULO DETECTADO: '.$type;
+        $blocks[] = $toneExtra;
         $blocks[] = <<<'TXT'
         Escribe un artículo propio para EsquinaAnime basado en el contenido de referencia.
         No copies párrafos literales: reescríbelo con tu voz.
@@ -75,7 +76,6 @@ class ArticleGenerationPrompt
         - Arranque directo. Nunca empieces con "En el mundo del anime..." o "Es importante destacar que...".
         - Cercano, como contárselo a un fan, no a un lector genérico.
         - Cubre los puntos importantes sin relleno. Si el contenido es extenso, usa subtítulos y párrafos; si es corto, un artículo breve bien escrito es suficiente.
-        - Si el contenido lo permite, cierra con una frase que anticipe qué significa esto para los fans.
 
         HTML para WordPress:
         - Usa <p>, <h2>, <h3>, <strong>, <ul><li> donde corresponda.

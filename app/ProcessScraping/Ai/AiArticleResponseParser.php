@@ -1,25 +1,20 @@
 <?php
 
-namespace App\ProcessScraping;
+namespace App\ProcessScraping\Ai;
 
 class AiArticleResponseParser
 {
     public function parse(string $raw): array
     {
-        // 1. limpiar fences
         $text = $this->stripOuterCodeFences($raw);
-
-        // 2. intentar extraer JSON si hay ruido
         $text = $this->extractJson($text);
 
-        // 3. intento directo (rápido y limpio)
         $data = json_decode($text, true);
 
         if (json_last_error() === JSON_ERROR_NONE) {
             return $this->format($data);
         }
 
-        // 4. fallback: arreglar JSON roto
         $fixed = $this->fixBrokenJson($text);
         $data = json_decode($fixed, true);
 
@@ -57,7 +52,6 @@ class AiArticleResponseParser
     {
         $text = trim($text);
 
-        // elimina ```json ... ```
         if (preg_match('/^```/', $text)) {
             $text = preg_replace('/^```[a-zA-Z0-9]*\s*/', '', $text);
             $text = preg_replace('/\s*```$/', '', $text);
@@ -87,17 +81,16 @@ class AiArticleResponseParser
         for ($i = 0; $i < strlen($json); $i++) {
             $char = $json[$i];
 
-            if ($char === '"' && !$escaped) {
-                $inString = !$inString;
+            if ($char === '"' && ! $escaped) {
+                $inString = ! $inString;
             }
 
-            // arreglar saltos de línea dentro de strings
             if ($inString && ($char === "\n" || $char === "\r")) {
                 $result .= '\\n';
                 continue;
             }
 
-            $escaped = ($char === '\\' && !$escaped);
+            $escaped = ($char === '\\' && ! $escaped);
             $result .= $char;
         }
 
