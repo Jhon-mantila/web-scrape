@@ -37,34 +37,50 @@ class DownloadFeaturedImagesAction
 
         foreach ($items as $news) {
             $processed++;
+            $result = $this->downloadForNews($news);
 
-            try {
-                $imageUrl = $this->extractor->extract($news);
-
-                if ($imageUrl === null) {
-                    $skipped++;
-                    continue;
-                }
-
-                $path = $this->download($imageUrl, $news->id);
-
-                if ($path === null) {
-                    $failed++;
-                    continue;
-                }
-
-                $news->detail?->update(['featured_image_path' => $path]);
-                $success++;
-            } catch (Throwable $e) {
-                $failed++;
-                Log::warning('featured_image: fallo al descargar', [
-                    'news_id' => $news->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+            match ($result) {
+                'success' => $success++,
+                'skipped' => $skipped++,
+                default => $failed++,
+            };
         }
 
         return compact('processed', 'success', 'skipped', 'failed');
+    }
+
+    public function downloadForNews(News $news): string
+    {
+        $news->loadMissing('detail');
+
+        if ($news->detail?->featured_image_path) {
+            return 'success';
+        }
+
+        try {
+            $imageUrl = $this->extractor->extract($news);
+
+            if ($imageUrl === null) {
+                return 'skipped';
+            }
+
+            $path = $this->download($imageUrl, $news->id);
+
+            if ($path === null) {
+                return 'failed';
+            }
+
+            $news->detail?->update(['featured_image_path' => $path]);
+
+            return 'success';
+        } catch (Throwable $e) {
+            Log::warning('featured_image: fallo al descargar', [
+                'news_id' => $news->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return 'failed';
+        }
     }
 
     private function download(string $url, int $newsId): ?string

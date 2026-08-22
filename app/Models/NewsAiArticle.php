@@ -13,6 +13,7 @@ class NewsAiArticle extends Model
         'generated_title',
         'excerpt',
         'body_html',
+        'raw_ai_response',
         'sent_wordpress',
         'sent_wordpress_at',
         'model',

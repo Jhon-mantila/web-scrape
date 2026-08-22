@@ -11,9 +11,12 @@ services:
       - .:/var/www/html
     depends_on:
       - mysql_db
-    # Para llamar a Ollama en el host desde Linux (host.docker.internal → IP del host)
+    environment:
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama.host:11434}
+    # host.docker.internal → Docker Desktop (Windows). Ollama en WSL usa ollama.host.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "ollama.host:${OLLAMA_HOST_IP:-172.31.193.25}"
 
   mysql_db:
     image: mysql:8.0

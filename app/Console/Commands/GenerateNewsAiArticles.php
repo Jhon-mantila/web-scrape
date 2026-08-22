@@ -36,10 +36,11 @@ class GenerateNewsAiArticles extends Command
                 $this->error('[news_id '.$err['news_id'].'] '.$err['message']);
             }
             $ollamaUrl = config('services.ollama.url');
-            if (str_contains($ollamaUrl, 'localhost') || str_contains($ollamaUrl, '127.0.0.1')) {
+            if (str_contains($ollamaUrl, 'localhost') || str_contains($ollamaUrl, '127.0.0.1') || str_contains($ollamaUrl, 'host.docker.internal')) {
                 $this->warn(
-                    'Si Laravel corre en Docker y Ollama en tu PC, localhost dentro del contenedor no es tu máquina. '
-                    .'Prueba en .env: OLLAMA_URL=http://host.docker.internal:11434 (o la IP del host en Linux).'
+                    'Ollama en WSL: host.docker.internal apunta a Windows, no a WSL donde corre Ollama. '
+                    .'Usa en .env: OLLAMA_HOST_IP=$(hostname -I | awk \'{print $1}\') y OLLAMA_URL=http://ollama.host:11434, '
+                    .'luego: docker compose up -d --force-recreate laravel_app && php artisan config:clear'
                 );
             }
         }

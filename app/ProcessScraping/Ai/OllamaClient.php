@@ -23,10 +23,15 @@ class OllamaClient
             $payload['format'] = 'json';
         }
 
+        if (str_contains($model, 'qwen3')) {
+            $payload['think'] = false;
+        }
+
         $options = array_filter([
-            'temperature' => config('services.ollama.temperature'),
-            'num_ctx' => config('services.ollama.num_ctx'),
-        ], fn ($value) => $value !== null);
+            'temperature' => (float) config('services.ollama.temperature'),
+            'num_ctx' => (int) config('services.ollama.num_ctx'),
+            'num_predict' => (int) config('services.ollama.num_predict'),
+        ], fn ($value) => $value !== null && $value !== 0 && $value !== '');
 
         if ($options !== []) {
             $payload['options'] = $options;

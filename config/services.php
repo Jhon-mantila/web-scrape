@@ -38,10 +38,11 @@ return [
     'ollama' => [
         'url' => env('OLLAMA_URL', 'http://localhost:11434'),
         'model' => env('OLLAMA_MODEL', 'qwen3:14b'),
-        'timeout' => env('OLLAMA_TIMEOUT', 600),
-        'format_json' => env('OLLAMA_FORMAT_JSON', true),
-        'temperature' => env('OLLAMA_TEMPERATURE', 0.75),
-        'num_ctx' => env('OLLAMA_NUM_CTX', 8192),
+        'timeout' => (int) env('OLLAMA_TIMEOUT', 600),
+        'format_json' => filter_var(env('OLLAMA_FORMAT_JSON', true), FILTER_VALIDATE_BOOLEAN),
+        'temperature' => (float) env('OLLAMA_TEMPERATURE', 0.75),
+        'num_ctx' => (int) env('OLLAMA_NUM_CTX', 16384),
+        'num_predict' => (int) env('OLLAMA_NUM_PREDICT', 4096),
     ],
 
     'wordpress' => [

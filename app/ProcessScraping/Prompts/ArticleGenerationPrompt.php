@@ -2,6 +2,8 @@
 
 namespace App\ProcessScraping\Prompts;
 
+use App\ProcessScraping\Support\PromptContextLimiter;
+
 class ArticleGenerationPrompt
 {
     public static function system(?string $articleType = null): string
@@ -39,6 +41,8 @@ class ArticleGenerationPrompt
 
         $type = $articleType ?? 'default';
         $toneExtra = PromptLibrary::userExtra($type);
+        $contentText = PromptContextLimiter::contentText($contentText);
+        $rawHtml = PromptContextLimiter::rawHtml($rawHtml);
 
         $blocks = [
             'TÍTULO ORIGINAL:',
@@ -56,11 +60,16 @@ class ArticleGenerationPrompt
 
         if (! empty($youtubeEmbeds)) {
             $blocks[] = '';
-            $blocks[] = 'VIDEOS DE YOUTUBE DISPONIBLES (inserta al menos uno en el HTML usando <iframe>):';
+            $blocks[] = 'VIDEOS DE YOUTUBE DISPONIBLES (solo puedes usar estos; inserta uno como máximo):';
 
             foreach ($youtubeEmbeds as $embed) {
                 $blocks[] = $embed;
             }
+        } else {
+            $blocks[] = '';
+            $blocks[] = 'VIDEOS: NO HAY VIDEOS EN ESTA NOTICIA.';
+            $blocks[] = 'PROHIBIDO inventar URLs, IDs o embeds de YouTube.';
+            $blocks[] = 'PROHIBIDO insertar <iframe>, <figure> de video o mencionar "mira el video" / "trailer" embebido si no hay video en la fuente.';
         }
 
         $blocks[] = '';
@@ -80,7 +89,8 @@ class ArticleGenerationPrompt
         HTML para WordPress:
         - Usa <p>, <h2>, <h3>, <strong>, <ul><li> donde corresponda.
         - Sin <html>, <body> ni <h1>.
-        - Solo inserta <iframe> de YouTube si se te proporcionaron URLs en la sección "VIDEOS DE YOUTUBE DISPONIBLES". Si no hay videos, no menciones ninguno y no inventes URLs.
+        - Solo inserta video si la sección "VIDEOS DE YOUTUBE DISPONIBLES" tiene URLs. Si dice "NO HAY VIDEOS", el HTML no debe contener iframe ni figure de YouTube.
+        - Nunca inventes IDs de YouTube (como 00000000000) ni dejes src vacío.
 
         Responde únicamente con JSON válido:
         {

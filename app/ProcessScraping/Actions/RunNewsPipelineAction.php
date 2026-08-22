@@ -41,7 +41,11 @@ class RunNewsPipelineAction
         $details = $this->scrapeDetails->execute($limit, $force);
         $images = $this->downloadImages->execute($limit);
         $ai = $this->generateAi->execute($limit, $force, $includeRawHtml);
-        $wordpress = $this->sendWordpress->execute($limit, $mode);
+        $wordpress = $this->sendWordpress->execute(
+            $limit,
+            $mode,
+            $ai['news_ids'] ?? [],
+        );
 
         return [
             'scrape_news' => $scrapeNewsCount,

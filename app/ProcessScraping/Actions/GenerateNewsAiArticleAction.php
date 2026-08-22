@@ -8,6 +8,7 @@ use App\ProcessScraping\Ai\AiArticleResponseParser;
 use App\ProcessScraping\Ai\OllamaClient;
 use App\ProcessScraping\Prompts\ArticleGenerationPrompt;
 use App\ProcessScraping\Prompts\ArticleTypeClassifier;
+use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -22,13 +23,14 @@ class GenerateNewsAiArticleAction
     ) {}
 
     /**
-     * @return array{processed: int, success: int, failed: int, errors: list<array{news_id: int, message: string}>}
+     * @return array{processed: int, success: int, failed: int, news_ids: list<int>, errors: list<array{news_id: int, message: string}>}
      */
     public function execute(int $limit, bool $force, bool $includeRawHtml): array
     {
         $processed = 0;
         $success = 0;
         $failed = 0;
+        $newsIds = [];
         $errors = [];
 
         $query = News::query()
@@ -68,23 +70,26 @@ class GenerateNewsAiArticleAction
                     $news->category,
                 );
 
+                $youtubeEmbeds = YoutubeExtractor::extract($detail->raw_html ?? null);
+
                 $body = null;
                 $parts = null;
+                $maxAttempts = ($includeRawHtml && $rawHtml !== null) ? 5 : 3;
 
-                for ($i = 0; $i < 3; $i++) {
-                    $youtubeEmbeds = YoutubeExtractor::extract($detail->raw_html ?? null);
+                for ($i = 0; $i < $maxAttempts; $i++) {
+                    $promptRawHtml = ($i < 3) ? $rawHtml : null;
 
                     $prompt = ArticleGenerationPrompt::user(
                         $news->title,
                         $detail->content_text,
-                        $rawHtml,
+                        $promptRawHtml,
                         $news->source,
                         $youtubeEmbeds,
                         $articleType,
                     );
 
                     if ($i > 0) {
-                        $prompt .= "\n\nTu respuesta anterior no fue JSON válido. Responde SOLO con JSON puro, sin ``` ni texto adicional.";
+                        $prompt .= "\n\nTu respuesta anterior no fue JSON válido o vino vacío. Responde SOLO con JSON puro con las claves title, excerpt y html. Sin ``` ni texto adicional.";
                     }
 
                     $body = $this->ollama->generate(
@@ -94,6 +99,8 @@ class GenerateNewsAiArticleAction
 
                     Log::info('news_ai: intento '.$i, [
                         'news_id' => $news->id,
+                        'with_raw_html' => $promptRawHtml !== null,
+                        'prompt_chars' => mb_strlen($prompt),
                         'response' => $body,
                     ]);
 
@@ -127,7 +134,9 @@ class GenerateNewsAiArticleAction
                     throw new \RuntimeException('Respuesta sin HTML válido');
                 }
 
-                DB::transaction(function () use ($news, $parts, $articleType): void {
+                $parts['body_html'] = HtmlArticleSanitizer::sanitize($parts['body_html'], $youtubeEmbeds);
+
+                DB::transaction(function () use ($news, $parts, $articleType, $body): void {
                     NewsAiArticle::updateOrCreate(
                         ['news_id' => $news->id],
                         [
@@ -135,14 +144,18 @@ class GenerateNewsAiArticleAction
                             'generated_title' => $parts['generated_title'],
                             'excerpt' => $parts['excerpt'],
                             'body_html' => $parts['body_html'],
+                            'raw_ai_response' => $body,
                             'model' => config('services.ollama.model'),
                             'article_type' => $articleType,
+                            'sent_wordpress' => false,
+                            'sent_wordpress_at' => null,
                         ],
                     );
                     $news->update(['status_ia' => 'processed']);
                 });
 
                 $success++;
+                $newsIds[] = $news->id;
             } catch (Throwable $e) {
                 $failed++;
                 $news->update(['status_ia' => 'failed']);
@@ -155,6 +168,12 @@ class GenerateNewsAiArticleAction
             }
         }
 
-        return compact('processed', 'success', 'failed', 'errors');
+        return [
+            'processed' => $processed,
+            'success' => $success,
+            'failed' => $failed,
+            'news_ids' => $newsIds,
+            'errors' => $errors,
+        ];
     }
 }

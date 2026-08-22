@@ -40,10 +40,7 @@ class WordPressClient
                 $filename,
                 ['Content-Type' => mime_content_type($filePath) ?: 'image/jpeg']
             )
-            ->post($url, [
-                'title' => pathinfo($filename, PATHINFO_FILENAME),
-                'status' => 'inherit',
-            ]);
+            ->post($url);
 
         if ($response->failed()) {
             throw new RuntimeException('Error subiendo media a WordPress: '.$response->body());
