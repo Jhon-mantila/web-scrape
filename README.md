@@ -18,14 +18,15 @@ Proyecto en Laravel para:
 
 ```
 ProcessScraping/
-├── Actions/          # Orquestación y casos de uso (pipeline, IA, imágenes)
-├── Ai/               # Cliente Ollama y parser de respuestas JSON
+├── Actions/          # Orquestación y casos de uso (pipeline, IA, imágenes, investigación)
+├── Ai/               # Cliente Ollama, parser JSON y selector de modelo
 ├── Prompts/          # Biblioteca de prompts y clasificador de artículos
-├── Images/           # Extracción de imagen destacada
-└── Support/          # Utilidades (YouTube, etc.)
+├── Research/         # SearXNG: búsquedas y formateo de contexto
+├── Images/           # Extracción y generación de imagen destacada (FLUX)
+└── Support/          # Utilidades (YouTube, sanitizado HTML, límites de prompt)
 ```
 
-Fases futuras: `Research/` (SearXNG) e `Images/Generators/` (FLUX).
+Fase 3: `Images/Generators/` (ComfyUI + FLUX Schnell como fallback).
 
 ## Requisitos
 
@@ -55,6 +56,104 @@ docker exec -it laravel_app composer install
 docker exec -it laravel_app php artisan key:generate
 docker exec -it laravel_app php artisan migrate
 ```
+
+## Fase 2 — SearXNG (investigación web)
+
+### 1. Levantar SearXNG
+
+```bash
+docker compose up -d searxng
+docker exec -it laravel_app php artisan migrate
+```
+
+SearXNG queda en: `http://localhost:8080`
+
+### 2. Variables en `.env`
+
+```env
+SEARXNG_ENABLED=true
+SEARXNG_URL=http://searxng:8080
+SEARXNG_MAX_QUERIES=3
+SEARXNG_RESULTS_PER_QUERY=3
+
+OLLAMA_MODEL=qwen3:14b
+OLLAMA_MODEL_PREMIUM=qwen3:30b-a3b
+OLLAMA_PREMIUM_MIN_CHARS=4500
+```
+
+El modelo **premium** (`qwen3:30b-a3b`) se usa automáticamente en noticias largas o traducciones de ANN.
+
+### 3. Probar investigación sola
+
+```bash
+docker exec -it laravel_app php artisan news:research --limit=2 --force
+```
+
+Revisa en `news_details`: columnas `research_context`, `research_raw`, `researched_at`.
+
+### 4. Pipeline con investigación
+
+```bash
+docker exec -it laravel_app php artisan news:pipeline --limit=3 --skip-scrape --force --include-raw-html --mode=draft
+```
+
+Orden: detalles → imágenes → **investigación (2-3 búsquedas)** → IA → WordPress
+
+Para omitir SearXNG: `--skip-research`
+
+## Fase 3 — ComfyUI + FLUX Schnell (imagen fallback)
+
+Cuando el scrape **no encuentra imagen**, el pipeline puede generar una con **FLUX Schnell** vía ComfyUI en el host WSL (mismo patrón que Ollama).
+
+### 1. Instalar ComfyUI en WSL
+
+Guía detallada: [`docker/comfyui/README.md`](docker/comfyui/README.md)
+
+Resumen:
+
+```bash
+# En WSL (fuera de Docker)
+git clone https://github.com/comfyanonymous/ComfyUI.git ~/ComfyUI
+cd ~/ComfyUI && python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+# Descargar modelos FLUX Schnell en las carpetas de ComfyUI:
+# models/unet/flux1-schnell.safetensors
+# models/clip/clip_l.safetensors + t5xxl_fp16.safetensors
+# models/vae/ae.safetensors
+
+python main.py --listen 0.0.0.0 --port 8188
+```
+
+### 2. Variables en `.env`
+
+```env
+COMFYUI_ENABLED=true
+COMFYUI_URL=http://comfyui.host:8188
+COMFYUI_HOST_IP=172.31.193.25
+COMFYUI_TIMEOUT=180
+```
+
+Usa la misma IP WSL que `OLLAMA_HOST_IP` (`hostname -I`).
+
+### 3. Probar generación sola
+
+```bash
+docker exec -it laravel_app php artisan migrate
+docker exec -it laravel_app php artisan news:generate-images --limit=2
+```
+
+Revisa `news_details.featured_image_path` y `featured_image_source` (`scraped` | `generated`).
+
+### 4. Pipeline con fallback FLUX
+
+```bash
+docker exec -it laravel_app php artisan news:pipeline --limit=3 --skip-scrape --include-raw-html --mode=draft
+```
+
+Orden: detalles → imágenes (scrape → **FLUX si falta**) → investigación → IA → WordPress
+
+Para omitir FLUX: `--skip-generate` o `COMFYUI_ENABLED=false`
 
 ## Comandos principales
 

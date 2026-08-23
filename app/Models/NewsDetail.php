@@ -12,6 +12,10 @@ class NewsDetail extends Model
         'status',
         'raw_html',
         'featured_image_path',
+        'featured_image_source',
+        'research_context',
+        'research_raw',
+        'researched_at',
         'content_text',
         'attempt_count',
         'last_error',
@@ -22,6 +26,8 @@ class NewsDetail extends Model
     protected $casts = [
         'scraped_at' => 'datetime',
         'processed_at' => 'datetime',
+        'researched_at' => 'datetime',
+        'research_raw' => 'array',
     ];
 
     public function news(): BelongsTo

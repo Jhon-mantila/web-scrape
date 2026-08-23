@@ -1,0 +1,14 @@
+use_default_settings: true
+
+server:
+  secret_key: "anime-scraper-local-searxng-secret"
+  limiter: false
+  image_proxy: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "es"
+  formats:
+    - html
+    - json

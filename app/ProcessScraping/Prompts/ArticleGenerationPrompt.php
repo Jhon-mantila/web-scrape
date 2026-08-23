@@ -18,6 +18,7 @@ class ArticleGenerationPrompt
         ?string $source = null,
         array $youtubeEmbeds = [],
         ?string $articleType = null,
+        ?string $researchContext = null,
     ): string {
 
         $extraInstructions = '';
@@ -51,6 +52,11 @@ class ArticleGenerationPrompt
             'CONTENIDO DE REFERENCIA (texto extraído de la noticia):',
             $contentText,
         ];
+
+        if ($researchContext !== null && trim($researchContext) !== '') {
+            $blocks[] = '';
+            $blocks[] = PromptContextLimiter::contentText($researchContext, 3000);
+        }
 
         if ($rawHtml !== null && $rawHtml !== '') {
             $blocks[] = '';

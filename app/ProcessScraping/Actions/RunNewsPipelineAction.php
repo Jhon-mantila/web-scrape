@@ -12,6 +12,7 @@ class RunNewsPipelineAction
         private readonly ScrapeNewsAction $scrapeNews,
         private readonly ScrapeNewsDetailsAction $scrapeDetails,
         private readonly DownloadFeaturedImagesAction $downloadImages,
+        private readonly ResearchNewsAction $research,
         private readonly GenerateNewsAiArticleAction $generateAi,
         private readonly SendPostToWordpressAction $sendWordpress,
     ) {}
@@ -20,8 +21,9 @@ class RunNewsPipelineAction
      * @return array{
      *     scrape_news: int,
      *     details: array{processed: int, success: int, failed: int},
-     *     images: array{processed: int, success: int, skipped: int, failed: int},
-     *     ai: array{processed: int, success: int, failed: int, errors: list<array{news_id: int, message: string}>},
+     *     images: array{processed: int, downloaded: int, generated: int, success: int, skipped: int, failed: int},
+     *     research: array{processed: int, success: int, skipped: int, failed: int},
+     *     ai: array{processed: int, success: int, failed: int, news_ids: list<int>, errors: list<array{news_id: int, message: string}>},
      *     wordpress: array{processed: int, success: int, failed: int}
      * }
      */
@@ -31,6 +33,8 @@ class RunNewsPipelineAction
         bool $force,
         bool $includeRawHtml,
         bool $skipScrape,
+        bool $skipResearch,
+        bool $skipGenerate = false,
     ): array {
         $scrapeNewsCount = 0;
 
@@ -39,7 +43,10 @@ class RunNewsPipelineAction
         }
 
         $details = $this->scrapeDetails->execute($limit, $force);
-        $images = $this->downloadImages->execute($limit);
+        $images = $this->downloadImages->execute($limit, $skipGenerate);
+        $research = $skipResearch
+            ? ['processed' => 0, 'success' => 0, 'skipped' => 0, 'failed' => 0]
+            : $this->research->execute($limit, $force);
         $ai = $this->generateAi->execute($limit, $force, $includeRawHtml);
         $wordpress = $this->sendWordpress->execute(
             $limit,
@@ -51,6 +58,7 @@ class RunNewsPipelineAction
             'scrape_news' => $scrapeNewsCount,
             'details' => $details,
             'images' => $images,
+            'research' => $research,
             'ai' => $ai,
             'wordpress' => $wordpress,
         ];

@@ -13,15 +13,24 @@ class DownloadFeaturedImagesAction
 {
     public function __construct(
         private readonly FeaturedImageExtractor $extractor,
+        private readonly GenerateFeaturedImagesAction $generateImages,
     ) {}
 
     /**
-     * @return array{processed: int, success: int, skipped: int, failed: int}
+     * @return array{
+     *     processed: int,
+     *     downloaded: int,
+     *     generated: int,
+     *     success: int,
+     *     skipped: int,
+     *     failed: int
+     * }
      */
-    public function execute(int $limit): array
+    public function execute(int $limit, bool $skipGenerate = false): array
     {
         $processed = 0;
-        $success = 0;
+        $downloaded = 0;
+        $generated = 0;
         $skipped = 0;
         $failed = 0;
 
@@ -37,16 +46,53 @@ class DownloadFeaturedImagesAction
 
         foreach ($items as $news) {
             $processed++;
-            $result = $this->downloadForNews($news);
+
+            $result = $this->processForNews($news, $skipGenerate);
 
             match ($result) {
-                'success' => $success++,
+                'downloaded' => $downloaded++,
+                'generated' => $generated++,
                 'skipped' => $skipped++,
                 default => $failed++,
             };
         }
 
-        return compact('processed', 'success', 'skipped', 'failed');
+        return [
+            'processed' => $processed,
+            'downloaded' => $downloaded,
+            'generated' => $generated,
+            'success' => $downloaded + $generated,
+            'skipped' => $skipped,
+            'failed' => $failed,
+        ];
+    }
+
+    private function processForNews(News $news, bool $skipGenerate): string
+    {
+        $news->loadMissing('detail');
+
+        if ($news->detail?->featured_image_path) {
+            return 'downloaded';
+        }
+
+        $scrapeResult = $this->downloadForNews($news);
+
+        if ($scrapeResult === 'success') {
+            return 'downloaded';
+        }
+
+        if ($skipGenerate || ! config('services.comfyui.enabled')) {
+            return match ($scrapeResult) {
+                'skipped' => 'skipped',
+                default => 'failed',
+            };
+        }
+
+        return match ($this->generateImages->generateForNews($news)) {
+            'generated' => 'generated',
+            'skipped' => 'skipped',
+            default => 'failed',
+        };
     }
 
     public function downloadForNews(News $news): string
@@ -70,7 +116,10 @@ class DownloadFeaturedImagesAction
                 return 'failed';
             }
 
-            $news->detail?->update(['featured_image_path' => $path]);
+            $news->detail?->update([
+                'featured_image_path' => $path,
+                'featured_image_source' => 'scraped',
+            ]);
 
             return 'success';
         } catch (Throwable $e) {

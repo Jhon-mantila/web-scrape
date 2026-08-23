@@ -38,6 +38,8 @@ return [
     'ollama' => [
         'url' => env('OLLAMA_URL', 'http://localhost:11434'),
         'model' => env('OLLAMA_MODEL', 'qwen3:14b'),
+        'model_premium' => env('OLLAMA_MODEL_PREMIUM', 'qwen3:30b-a3b'),
+        'premium_min_chars' => (int) env('OLLAMA_PREMIUM_MIN_CHARS', 4500),
         'timeout' => (int) env('OLLAMA_TIMEOUT', 600),
         'format_json' => filter_var(env('OLLAMA_FORMAT_JSON', true), FILTER_VALIDATE_BOOLEAN),
         'temperature' => (float) env('OLLAMA_TEMPERATURE', 0.75),
@@ -49,6 +51,41 @@ return [
         'url' => env('WORDPRESS_URL'),
         'user' => env('WORDPRESS_USER'),
         'password' => env('WORDPRESS_PASSWORD'),
+    ],
+
+    'searxng' => [
+        'enabled' => filter_var(env('SEARXNG_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+        'url' => env('SEARXNG_URL', 'http://searxng:8080'),
+        'timeout' => (int) env('SEARXNG_TIMEOUT', 20),
+        'language' => env('SEARXNG_LANGUAGE', 'es-ES'),
+        'max_queries' => (int) env('SEARXNG_MAX_QUERIES', 3),
+        'results_per_query' => (int) env('SEARXNG_RESULTS_PER_QUERY', 3),
+    ],
+
+    'comfyui' => [
+        'enabled' => filter_var(env('COMFYUI_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+        'url' => env('COMFYUI_URL', 'http://localhost:8188'),
+        'timeout' => (int) env('COMFYUI_TIMEOUT', 180),
+        'poll_interval_ms' => (int) env('COMFYUI_POLL_INTERVAL_MS', 500),
+        'workflow_path' => env('COMFYUI_WORKFLOW_PATH', resource_path('comfyui/flux-schnell-featured.json')),
+        'prompt_node' => env('COMFYUI_PROMPT_NODE', '6'),
+        'sampler_node' => env('COMFYUI_SAMPLER_NODE', '3'),
+        'latent_node' => env('COMFYUI_LATENT_NODE', '5'),
+        'unet_node' => env('COMFYUI_UNET_NODE', '12'),
+        'vae_node' => env('COMFYUI_VAE_NODE', '10'),
+        'clip_node' => env('COMFYUI_CLIP_NODE', '11'),
+        'unet_name' => env('COMFYUI_UNET_NAME', 'flux1-schnell.safetensors'),
+        'vae_name' => env('COMFYUI_VAE_NAME', 'ae.safetensors'),
+        'clip_name1' => env('COMFYUI_CLIP_NAME1', 'clip_l.safetensors'),
+        'clip_name2' => env('COMFYUI_CLIP_NAME2', 't5xxl_fp16.safetensors'),
+        'steps' => (int) env('COMFYUI_STEPS', 4),
+        'width' => (int) env('COMFYUI_WIDTH', 1216),
+        'height' => (int) env('COMFYUI_HEIGHT', 684),
+        'prompt_max_chars' => (int) env('COMFYUI_PROMPT_MAX_CHARS', 320),
+        'prompt_template' => env(
+            'COMFYUI_PROMPT_TEMPLATE',
+            'anime illustration, {title}, {category} theme, vibrant colors, cinematic lighting, detailed background, no text, no watermark, no logos'
+        ),
     ],
 
 ];

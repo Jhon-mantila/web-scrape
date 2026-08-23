@@ -6,6 +6,7 @@ use App\Models\News;
 use App\Models\NewsAiArticle;
 use App\ProcessScraping\Ai\AiArticleResponseParser;
 use App\ProcessScraping\Ai\OllamaClient;
+use App\ProcessScraping\Ai\OllamaModelSelector;
 use App\ProcessScraping\Prompts\ArticleGenerationPrompt;
 use App\ProcessScraping\Prompts\ArticleTypeClassifier;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
@@ -20,6 +21,7 @@ class GenerateNewsAiArticleAction
         private readonly OllamaClient $ollama,
         private readonly AiArticleResponseParser $parser,
         private readonly ArticleTypeClassifier $classifier,
+        private readonly OllamaModelSelector $modelSelector,
     ) {}
 
     /**
@@ -71,6 +73,8 @@ class GenerateNewsAiArticleAction
                 );
 
                 $youtubeEmbeds = YoutubeExtractor::extract($detail->raw_html ?? null);
+                $model = $this->modelSelector->forNews($news, $detail->content_text);
+                $researchContext = $detail->research_context;
 
                 $body = null;
                 $parts = null;
@@ -86,6 +90,7 @@ class GenerateNewsAiArticleAction
                         $news->source,
                         $youtubeEmbeds,
                         $articleType,
+                        $researchContext,
                     );
 
                     if ($i > 0) {
@@ -95,11 +100,14 @@ class GenerateNewsAiArticleAction
                     $body = $this->ollama->generate(
                         ArticleGenerationPrompt::system($articleType),
                         $prompt,
+                        $model,
                     );
 
                     Log::info('news_ai: intento '.$i, [
                         'news_id' => $news->id,
+                        'model' => $model,
                         'with_raw_html' => $promptRawHtml !== null,
+                        'has_research' => $researchContext !== null,
                         'prompt_chars' => mb_strlen($prompt),
                         'response' => $body,
                     ]);
@@ -136,7 +144,7 @@ class GenerateNewsAiArticleAction
 
                 $parts['body_html'] = HtmlArticleSanitizer::sanitize($parts['body_html'], $youtubeEmbeds);
 
-                DB::transaction(function () use ($news, $parts, $articleType, $body): void {
+                DB::transaction(function () use ($news, $parts, $articleType, $body, $model): void {
                     NewsAiArticle::updateOrCreate(
                         ['news_id' => $news->id],
                         [
@@ -145,7 +153,7 @@ class GenerateNewsAiArticleAction
                             'excerpt' => $parts['excerpt'],
                             'body_html' => $parts['body_html'],
                             'raw_ai_response' => $body,
-                            'model' => config('services.ollama.model'),
+                            'model' => $model,
                             'article_type' => $articleType,
                             'sent_wordpress' => false,
                             'sent_wordpress_at' => null,
