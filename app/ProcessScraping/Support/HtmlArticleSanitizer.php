@@ -18,12 +18,15 @@ class HtmlArticleSanitizer
         $html = self::removeUnauthorizedYoutubeEmbeds($html, $allowedIds);
 
         if ($allowedIds === []) {
-            return trim($html);
+            return self::collapseEmptyParagraphs(trim($html));
         }
 
         $html = self::fixBrokenIframes($html);
-        $html = self::normalizeIframes($html, $allowedIds);
+        $html = self::normalizeFigureEmbeds($html, $allowedIds);
+        $html = self::normalizeBareIframes($html, $allowedIds);
         $html = self::removeProblematicAttributes($html);
+        $html = self::collapseWhitespaceAroundEmbeds($html);
+        $html = self::collapseEmptyParagraphs($html);
 
         return trim($html);
     }
@@ -48,7 +51,7 @@ class HtmlArticleSanitizer
 
     private static function parseVideoId(string $url): ?string
     {
-        if (preg_match('/(?:embed\/|watch\?v=|youtu\.be\/)([\w\-]{11})/i', $url, $match)) {
+        if (preg_match('#(?:embed/|watch\?v=|youtu\.be/)([\w-]{11})#i', $url, $match)) {
             $id = $match[1];
 
             return self::isValidVideoId($id) ? $id : null;
@@ -59,11 +62,15 @@ class HtmlArticleSanitizer
 
     private static function isValidVideoId(string $id): bool
     {
-        if (! preg_match('/^[\w\-]{11}$/', $id)) {
+        if (strlen($id) !== 11) {
             return false;
         }
 
-        if (preg_match('/^0+$/', $id)) {
+        if (! preg_match('#^[\w-]+$#', $id)) {
+            return false;
+        }
+
+        if (preg_match('#^0+$#', $id)) {
             return false;
         }
 
@@ -115,8 +122,8 @@ class HtmlArticleSanitizer
             return true;
         }
 
-        if (preg_match('/src=["\']([^"\']+)["\']/i', $fragment, $match)) {
-            $id = self::parseVideoId(html_entity_decode($match[1], ENT_QUOTES | ENT_HTML5));
+        if (preg_match('#src=(["\'])(.+?)\1#i', $fragment, $match)) {
+            $id = self::parseVideoId(html_entity_decode($match[2], ENT_QUOTES | ENT_HTML5));
 
             return $id !== null && in_array($id, $allowedIds, true);
         }
@@ -138,9 +145,7 @@ class HtmlArticleSanitizer
             $html = preg_replace($pattern, '', $html) ?? $html;
         }
 
-        $html = preg_replace('/\n{3,}/', "\n\n", $html) ?? $html;
-
-        return trim($html);
+        return self::collapseEmptyParagraphs(trim($html));
     }
 
     private static function fixBrokenIframes(string $html): string
@@ -152,8 +157,20 @@ class HtmlArticleSanitizer
         );
 
         $html = preg_replace(
+            '/<p([^>]*)>\s*<figure\b/i',
+            '<figure',
+            $html
+        ) ?? $html;
+
+        $html = preg_replace(
+            '/<\/figure>\s*<\/p>/i',
+            '</figure>',
+            $html
+        ) ?? $html;
+
+        $html = preg_replace(
             '/<iframe([^>]*?)>\s*<\/p>/i',
-            '<iframe$1></iframe></p>',
+            '<iframe$1></iframe>',
             $html
         );
 
@@ -163,32 +180,113 @@ class HtmlArticleSanitizer
     /**
      * @param  list<string>  $allowedIds
      */
-    private static function normalizeIframes(string $html, array $allowedIds): string
+    private static function normalizeFigureEmbeds(string $html, array $allowedIds): string
     {
-        return preg_replace_callback('/<iframe\b[^>]*>/i', function (array $matches) use ($allowedIds): string {
-            $tag = $matches[0];
+        return preg_replace_callback(
+            '/<figure\b[^>]*>.*?youtube.*?<\/figure>/is',
+            function (array $match) use ($allowedIds): string {
+                if (! preg_match('#src=(["\'])(.+?)\1#i', $match[0], $srcMatch)) {
+                    return '';
+                }
 
-            if (! preg_match('/src=["\']([^"\']+)["\']/i', $tag, $srcMatch)) {
-                return '';
+                $id = self::parseVideoId(html_entity_decode($srcMatch[2], ENT_QUOTES | ENT_HTML5));
+
+                if ($id === null || ! in_array($id, $allowedIds, true)) {
+                    return '';
+                }
+
+                return self::buildCompactEmbed('https://www.youtube.com/embed/'.$id);
+            },
+            $html
+        ) ?? $html;
+    }
+
+    /**
+     * Solo iframes sueltos (fuera de <figure>); evita anidar dos figures.
+     *
+     * @param  list<string>  $allowedIds
+     */
+    private static function normalizeBareIframes(string $html, array $allowedIds): string
+    {
+        if (! str_contains(mb_strtolower($html), '<iframe')) {
+            return $html;
+        }
+
+        $parts = preg_split('/(<figure\b[^>]*>.*?<\/figure>)/is', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+
+        if ($parts === false) {
+            return $html;
+        }
+
+        $result = '';
+
+        foreach ($parts as $index => $part) {
+            if ($index % 2 === 1) {
+                $result .= $part;
+
+                continue;
             }
 
-            $src = html_entity_decode($srcMatch[1], ENT_QUOTES | ENT_HTML5);
-            $id = self::parseVideoId($src);
+            $result .= preg_replace_callback('/<iframe\b[^>]*>/i', function (array $matches) use ($allowedIds): string {
+                $tag = $matches[0];
 
-            if ($id === null || ! in_array($id, $allowedIds, true)) {
-                return '';
-            }
+                if (! preg_match('#src=(["\'])(.+?)\1#i', $tag, $srcMatch)) {
+                    return '';
+                }
 
-            $embedSrc = 'https://www.youtube.com/embed/'.$id;
+                $src = html_entity_decode($srcMatch[2], ENT_QUOTES | ENT_HTML5);
+                $id = self::parseVideoId($src);
 
-            return '<figure class="wp-block-embed is-type-video is-provider-youtube wp-embed-aspect-16-9">'
-                .'<div class="wp-block-embed__wrapper">'
-                .'<iframe src="'.htmlspecialchars($embedSrc, ENT_QUOTES | ENT_HTML5).'" '
-                .'width="640" height="360" frameborder="0" '
-                .'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" '
-                .'allowfullscreen></iframe>'
-                .'</div></figure>';
-        }, $html) ?? $html;
+                if ($id === null || ! in_array($id, $allowedIds, true)) {
+                    return '';
+                }
+
+                return self::buildCompactEmbed('https://www.youtube.com/embed/'.$id);
+            }, $part) ?? $part;
+        }
+
+        return $result;
+    }
+
+    private static function buildCompactEmbed(string $embedSrc): string
+    {
+        $src = htmlspecialchars($embedSrc, ENT_QUOTES | ENT_HTML5);
+
+        return '<figure class="wp-block-embed is-type-video is-provider-youtube" '
+            .'style="margin:0.75em 0;max-width:100%;">'
+            .'<iframe src="'.$src.'" '
+            .'width="100%" height="360" loading="lazy" frameborder="0" '
+            .'style="display:block;width:100%;max-width:100%;aspect-ratio:16/9;border:0;vertical-align:top;" '
+            .'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" '
+            .'allowfullscreen></iframe>'
+            .'</figure>';
+    }
+
+    private static function collapseWhitespaceAroundEmbeds(string $html): string
+    {
+        $html = preg_replace('/(<figure\b[^>]*>.*?<\/figure>\s*)+/is', '$1', $html) ?? $html;
+
+        $html = preg_replace('/(\s*<br\s*\/?>\s*)+(<figure\b)/i', '$2', $html) ?? $html;
+        $html = preg_replace('/(<\/figure>)(\s*<br\s*\/?>\s*)+/i', '$1', $html) ?? $html;
+
+        $html = preg_replace('/(<\/p>\s*)+(<figure\b)/i', '</p>$2', $html) ?? $html;
+        $html = preg_replace('/(<\/figure>)(\s*<p)/i', '$1$2', $html) ?? $html;
+
+        $html = preg_replace('/<p([^>]*)>\s*(<figure\b)/i', '$2', $html) ?? $html;
+        $html = preg_replace('/(<\/figure>)\s*<\/p>/i', '$1', $html) ?? $html;
+
+        $html = preg_replace('/<div\b[^>]*class="[^"]*wp-block-embed__wrapper[^"]*"[^>]*>\s*(<iframe)/i', '$1', $html) ?? $html;
+        $html = preg_replace('/(<\/iframe>)\s*<\/div>\s*(<\/figure>)/i', '$1$2', $html) ?? $html;
+
+        return $html;
+    }
+
+    private static function collapseEmptyParagraphs(string $html): string
+    {
+        $html = preg_replace('/<p[^>]*>\s*(?:<br\s*\/?>\s*)*<\/p>/i', '', $html) ?? $html;
+        $html = preg_replace('/\n{3,}/', "\n\n", $html) ?? $html;
+
+        return trim($html);
     }
 
     private static function removeProblematicAttributes(string $html): string
@@ -196,6 +294,8 @@ class HtmlArticleSanitizer
         $html = preg_replace('/\salign="center"/i', '', $html);
         $html = preg_replace('/\sstyle="[^"]*position:\s*absolute[^"]*"/i', '', $html);
         $html = preg_replace('/\sreferrerpolicy="[^"]*"/i', '', $html);
+        $html = preg_replace('/\swp-embed-aspect-16-9\b/i', '', $html);
+        $html = preg_replace('/\swp-has-aspect-ratio\b/i', '', $html);
 
         return $html ?? $html;
     }

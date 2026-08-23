@@ -288,10 +288,37 @@ docker exec -it laravel_app php artisan news:generate-ai --limit=1 --include-raw
 
 ```bash
 docker exec -it laravel_app php artisan news:send-wordpress --limit=5 --mode=draft
+
+# Programar en cola (respeta máximo por día e intervalo entre posts)
+docker exec -it laravel_app php artisan news:send-wordpress --limit=30 --mode=schedule
 ```
 
-- `--limit=N` — cuántos artículos enviar.
-- `--mode=draft` — publica como borrador (`publish` o `schedule` también disponibles).
+- `--limit=N` — cuántos artículos enviar en **esta ejecución** (usa un número alto para programar varios días).
+- `--mode=draft` — borrador | `publish` — publicar ya | `schedule` — programar en WordPress.
+
+**Modo `schedule`:** consulta WordPress cuántos posts hay **publicados o programados** cada día. Si un día ya tiene el máximo, pasa al siguiente. Repite hasta agotar el `--limit`.
+
+**Dos autores (reparto automático):** si defines `WORDPRESS_USER_2` y `WORDPRESS_PASSWORD_2`, alterna autores en cada artículo (10 → 5+5, 5 → 3+2). Cada post se crea con la Application Password de su autor; la imagen destacada se sube con la misma cuenta.
+
+```env
+WORDPRESS_USER=autor1
+WORDPRESS_PASSWORD=xxxx
+WORDPRESS_USER_2=autor2
+WORDPRESS_PASSWORD_2=yyyy
+```
+
+Variables de programación:
+
+```env
+WORDPRESS_SCHEDULE_TIMEZONE=America/Bogota
+WORDPRESS_SCHEDULE_MAX_PER_DAY=5
+WORDPRESS_SCHEDULE_START_HOUR=9
+WORDPRESS_SCHEDULE_START_MINUTE=0
+WORDPRESS_SCHEDULE_INTERVAL_HOURS=3
+WORDPRESS_SCHEDULE_INTERVAL_MIN_HOURS=2
+```
+
+Ejemplo con 5/día, inicio 9:00, intervalo 2–3 h: posts a ~9:00, ~12:00, ~15:00, ~18:00, ~21:00. El día siguiente continúa desde 9:00.
 
 ---
 

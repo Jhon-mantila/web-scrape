@@ -97,6 +97,7 @@ class ArticleGenerationPrompt
         - Sin <html>, <body> ni <h1>.
         - Solo inserta video si la sección "VIDEOS DE YOUTUBE DISPONIBLES" tiene URLs. Si dice "NO HAY VIDEOS", el HTML no debe contener iframe ni figure de YouTube.
         - Nunca inventes IDs de YouTube (como 00000000000) ni dejes src vacío.
+        - Si hay video, colócalo en un solo <figure> sin <p> vacíos antes ni después; el texto debe ir pegado al bloque del video, sin saltos de línea extra.
 
         Responde únicamente con JSON válido:
         {

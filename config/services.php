@@ -52,6 +52,14 @@ return [
         'url' => env('WORDPRESS_URL'),
         'user' => env('WORDPRESS_USER'),
         'password' => env('WORDPRESS_PASSWORD'),
+        'user_2' => env('WORDPRESS_USER_2'),
+        'password_2' => env('WORDPRESS_PASSWORD_2'),
+        'schedule_timezone' => env('WORDPRESS_SCHEDULE_TIMEZONE', env('APP_TIMEZONE', 'America/Bogota')),
+        'schedule_max_per_day' => (int) env('WORDPRESS_SCHEDULE_MAX_PER_DAY', 5),
+        'schedule_start_hour' => (int) env('WORDPRESS_SCHEDULE_START_HOUR', 9),
+        'schedule_start_minute' => (int) env('WORDPRESS_SCHEDULE_START_MINUTE', 0),
+        'schedule_interval_hours' => (int) env('WORDPRESS_SCHEDULE_INTERVAL_HOURS', 3),
+        'schedule_interval_min_hours' => env('WORDPRESS_SCHEDULE_INTERVAL_MIN_HOURS'),
     ],
 
     'searxng' => [

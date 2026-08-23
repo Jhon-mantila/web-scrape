@@ -39,36 +39,69 @@ class NewsPipeline extends Command
             (bool) $this->option('skip-generate'),
         );
 
+        $timings = $summary['timings'] ?? [];
         $step = 1;
 
         if (! $this->option('skip-scrape')) {
-            $this->line($step++.'. Scrape listado: '.$summary['scrape_news'].' URLs nuevas');
+            $this->line($this->stepLine(
+                $step++,
+                'Scrape listado: '.$summary['scrape_news'].' URLs nuevas',
+                $timings['scrape'] ?? null,
+            ));
         }
 
-        $this->line($step++.'. Detalles — procesadas: '.$summary['details']['processed']
-            .' | OK: '.$summary['details']['success']
-            .' | fallidas: '.$summary['details']['failed']);
+        $this->line($this->stepLine(
+            $step++,
+            'Detalles — procesadas: '.$summary['details']['processed']
+                .' | OK: '.$summary['details']['success']
+                .' | fallidas: '.$summary['details']['failed'],
+            $timings['details'] ?? null,
+        ));
 
-        $this->line($step++.'. Imágenes — procesadas: '.$summary['images']['processed']
-            .' | descargadas: '.$summary['images']['downloaded']
-            .' | generadas (FLUX): '.$summary['images']['generated']
-            .' | sin imagen: '.$summary['images']['skipped']
-            .' | fallidas: '.$summary['images']['failed']);
+        $this->line($this->stepLine(
+            $step++,
+            'Imágenes — procesadas: '.$summary['images']['processed']
+                .' | descargadas: '.$summary['images']['downloaded']
+                .' | generadas (FLUX): '.$summary['images']['generated']
+                .' | sin imagen: '.$summary['images']['skipped']
+                .' | fallidas: '.$summary['images']['failed'],
+            $timings['images'] ?? null,
+        ));
 
         if (! $this->option('skip-research')) {
-            $this->line($step++.'. Investigación — procesadas: '.$summary['research']['processed']
-                .' | OK: '.$summary['research']['success']
-                .' | sin resultados: '.$summary['research']['skipped']
-                .' | fallidas: '.$summary['research']['failed']);
+            $this->line($this->stepLine(
+                $step++,
+                'Investigación — procesadas: '.$summary['research']['processed']
+                    .' | OK: '.$summary['research']['success']
+                    .' | sin resultados: '.$summary['research']['skipped']
+                    .' | fallidas: '.$summary['research']['failed'],
+                $timings['research'] ?? null,
+            ));
         }
 
-        $this->line($step++.'. IA — procesadas: '.$summary['ai']['processed']
-            .' | OK: '.$summary['ai']['success']
-            .' | fallidas: '.$summary['ai']['failed']);
+        $this->line($this->stepLine(
+            $step++,
+            'IA — procesadas: '.$summary['ai']['processed']
+                .' | OK: '.$summary['ai']['success']
+                .' | fallidas: '.$summary['ai']['failed'],
+            $timings['ai'] ?? null,
+        ));
 
-        $this->line($step.'. WordPress — procesadas: '.$summary['wordpress']['processed']
+        $wpLine = 'WordPress — procesadas: '.$summary['wordpress']['processed']
             .' | OK: '.$summary['wordpress']['success']
-            .' | fallidas: '.$summary['wordpress']['failed']);
+            .' | fallidas: '.$summary['wordpress']['failed'];
+
+        if (($summary['wordpress']['by_author'] ?? []) !== []) {
+            $parts = [];
+
+            foreach ($summary['wordpress']['by_author'] as $author => $count) {
+                $parts[] = "{$author}: {$count}";
+            }
+
+            $wpLine .= ' | autores: '.implode(', ', $parts);
+        }
+
+        $this->line($this->stepLine($step, $wpLine, $timings['wordpress'] ?? null));
 
         if ($summary['wordpress']['processed'] === 0 && $summary['ai']['success'] > 0) {
             $this->warn(
@@ -95,6 +128,17 @@ class NewsPipeline extends Command
         $this->line('Tiempo total: '.$this->formatDuration(microtime(true) - $startedAt));
 
         return Command::SUCCESS;
+    }
+
+    private function stepLine(int $number, string $content, ?float $seconds): string
+    {
+        $line = $number.'. '.$content;
+
+        if ($seconds !== null) {
+            $line .= ' — '.$this->formatDuration($seconds);
+        }
+
+        return $line;
     }
 
     private function formatDuration(float $seconds): string
