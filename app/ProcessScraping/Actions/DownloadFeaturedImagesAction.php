@@ -118,12 +118,12 @@ class DownloadFeaturedImagesAction
                 return 'failed';
             }
 
+            $finalPath = $this->watermarker->apply($path) ?? $path;
+
             $news->detail?->update([
-                'featured_image_path' => $path,
+                'featured_image_path' => $finalPath,
                 'featured_image_source' => 'scraped',
             ]);
-
-            $this->watermarker->apply($path);
 
             return 'success';
         } catch (Throwable $e) {

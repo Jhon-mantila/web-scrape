@@ -92,11 +92,13 @@ return [
     ],
 
     'featured_image' => [
+        'output_format' => env('FEATURED_IMAGE_OUTPUT_FORMAT', 'webp'),
+        'output_quality' => (int) env('FEATURED_IMAGE_OUTPUT_QUALITY', 85),
         'watermark_enabled' => filter_var(env('FEATURED_IMAGE_WATERMARK_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         'watermark_path' => env('FEATURED_IMAGE_WATERMARK_PATH', storage_path('app/public/Logo/esquina_anime_logo.png')),
         'watermark_position' => env('FEATURED_IMAGE_WATERMARK_POSITION', 'bottom-left'),
         'watermark_margin' => (int) env('FEATURED_IMAGE_WATERMARK_MARGIN', 24),
-        'watermark_margin_bottom' => (int) env('FEATURED_IMAGE_WATERMARK_MARGIN_BOTTOM', 0),
+        'watermark_margin_bottom' => (int) env('FEATURED_IMAGE_WATERMARK_MARGIN_BOTTOM', 48),
         'watermark_width_percent' => (float) env('FEATURED_IMAGE_WATERMARK_WIDTH_PERCENT', 22),
         'watermark_opacity' => (int) env('FEATURED_IMAGE_WATERMARK_OPACITY', 90),
         'watermark_mask_enabled' => filter_var(env('FEATURED_IMAGE_WATERMARK_MASK_ENABLED', true), FILTER_VALIDATE_BOOLEAN),

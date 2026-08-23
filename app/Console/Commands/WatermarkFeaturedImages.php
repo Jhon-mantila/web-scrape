@@ -39,9 +39,14 @@ class WatermarkFeaturedImages extends Command
                 continue;
             }
 
-            if ($watermarker->apply($path)) {
+            $finalPath = $watermarker->apply($path);
+
+            if ($finalPath !== null) {
+                if ($finalPath !== $path) {
+                    $news->detail?->update(['featured_image_path' => $finalPath]);
+                }
                 $success++;
-                $this->line("OK news_id={$news->id} → {$path}");
+                $this->line("OK news_id={$news->id} → {$finalPath}");
             } else {
                 $failed++;
                 $this->error("Fallo news_id={$news->id} → {$path}");

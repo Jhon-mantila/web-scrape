@@ -98,10 +98,10 @@ class GenerateFeaturedImagesAction
                 return 'failed';
             }
 
-            $this->watermarker->apply($path);
+            $finalPath = $this->watermarker->apply($path) ?? $path;
 
             $news->detail?->update([
-                'featured_image_path' => $path,
+                'featured_image_path' => $finalPath,
                 'featured_image_source' => 'generated',
             ]);
 
@@ -128,7 +128,7 @@ class GenerateFeaturedImagesAction
             return null;
         }
 
-        $path = "featured-images/{$newsId}.jpg";
+        $path = "featured-images/{$newsId}.webp";
 
         Storage::disk('public')->put($path, $binary);
 

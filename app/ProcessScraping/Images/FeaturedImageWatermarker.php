@@ -9,10 +9,15 @@ use Throwable;
 
 class FeaturedImageWatermarker
 {
-    public function apply(string $relativePath): bool
+    /**
+     * Aplica marca de agua y normaliza el formato de salida (webp por defecto).
+     *
+     * @return string|null Ruta relativa final en disco, o null si falló
+     */
+    public function apply(string $relativePath): ?string
     {
         if (! config('services.featured_image.watermark_enabled')) {
-            return true;
+            return $this->normalizeOnly($relativePath);
         }
 
         $logoPath = (string) config('services.featured_image.watermark_path');
@@ -20,30 +25,36 @@ class FeaturedImageWatermarker
         if ($logoPath === '' || ! is_readable($logoPath)) {
             Log::warning('featured_image: logo de marca de agua no encontrado', ['path' => $logoPath]);
 
-            return false;
+            return null;
         }
 
         $disk = Storage::disk('public');
 
         if (! $disk->exists($relativePath)) {
-            return false;
+            return null;
         }
 
         $imagePath = $disk->path($relativePath);
 
         try {
-            $main = $this->loadImage($imagePath);
+            $main = $this->loadMainImage($imagePath);
 
             if ($main === null) {
-                return false;
+                Log::warning('featured_image: no se pudo cargar imagen para marca de agua', [
+                    'path' => $relativePath,
+                    'webp_read' => \function_exists('imagecreatefromwebp'),
+                    'webp_write' => \function_exists('imagewebp'),
+                ]);
+
+                return null;
             }
 
-            $logo = $this->loadImage($logoPath);
+            $logo = $this->loadLogoImage($logoPath);
 
             if ($logo === null) {
                 \imagedestroy($main);
 
-                return false;
+                return null;
             }
 
             $mainWidth = \imagesx($main);
@@ -62,7 +73,8 @@ class FeaturedImageWatermarker
             \imagesavealpha($resizedLogo, true);
             $transparent = \imagecolorallocatealpha($resizedLogo, 0, 0, 0, 127);
             \imagefilledrectangle($resizedLogo, 0, 0, $targetLogoWidth, $targetLogoHeight, $transparent);
-            \imagealphablending($logo, true);
+            \imagealphablending($resizedLogo, true);
+            \imagesavealpha($resizedLogo, true);
             \imagecopyresampled(
                 $resizedLogo,
                 $logo,
@@ -80,7 +92,7 @@ class FeaturedImageWatermarker
 
             $position = (string) config('services.featured_image.watermark_position', 'bottom-left');
             $margin = (int) config('services.featured_image.watermark_margin', 24);
-            $marginBottom = (int) config('services.featured_image.watermark_margin_bottom', 0);
+            $marginBottom = (int) config('services.featured_image.watermark_margin_bottom', 48);
 
             [$x, $y] = $this->position(
                 $position,
@@ -114,24 +126,70 @@ class FeaturedImageWatermarker
                 (int) config('services.featured_image.watermark_opacity', 90),
             );
 
-            $saved = $this->saveImage($main, $imagePath);
+            $finalPath = $this->saveNormalized($main, $relativePath, $disk);
 
             \imagedestroy($main);
             \imagedestroy($logo);
             \imagedestroy($resizedLogo);
 
-            return $saved;
+            return $finalPath;
         } catch (Throwable $e) {
             Log::warning('featured_image: fallo al aplicar marca de agua', [
                 'path' => $relativePath,
                 'error' => $e->getMessage(),
             ]);
 
-            return false;
+            return null;
         }
     }
 
-    private function loadImage(string $path): ?GdImage
+    private function normalizeOnly(string $relativePath): ?string
+    {
+        $disk = Storage::disk('public');
+
+        if (! $disk->exists($relativePath)) {
+            return null;
+        }
+
+        $main = $this->loadMainImage($disk->path($relativePath));
+
+        if ($main === null) {
+            return null;
+        }
+
+        $finalPath = $this->saveNormalized($main, $relativePath, $disk);
+        \imagedestroy($main);
+
+        return $finalPath;
+    }
+
+    private function loadMainImage(string $path): ?GdImage
+    {
+        $image = $this->decodeImage($path);
+
+        if ($image === null) {
+            return null;
+        }
+
+        return $this->flattenToOpaqueCanvas($image);
+    }
+
+    /** Logo PNG: conserva transparencia (sin fondo negro). */
+    private function loadLogoImage(string $path): ?GdImage
+    {
+        $image = $this->decodeImage($path);
+
+        if ($image === null) {
+            return null;
+        }
+
+        \imagealphablending($image, false);
+        \imagesavealpha($image, true);
+
+        return $image;
+    }
+
+    private function decodeImage(string $path): ?GdImage
     {
         $info = @\getimagesize($path);
 
@@ -152,18 +210,70 @@ class FeaturedImageWatermarker
             \imagesavealpha($image, true);
         }
 
-        return $image;
+        return $image instanceof GdImage ? $image : null;
     }
 
-    private function saveImage(GdImage $image, string $path): bool
+    /**
+     * Foto principal en canvas opaco (solo la imagen base, no el logo).
+     */
+    private function flattenToOpaqueCanvas(GdImage $source): GdImage
     {
-        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        $width = \imagesx($source);
+        $height = \imagesy($source);
+        $canvas = \imagecreatetruecolor($width, $height);
 
-        return match ($extension) {
+        $background = \imagecolorallocate($canvas, 0, 0, 0);
+        \imagefilledrectangle($canvas, 0, 0, $width, $height, $background);
+        \imagealphablending($canvas, true);
+        \imagecopy($canvas, $source, 0, 0, 0, 0, $width, $height);
+        \imagedestroy($source);
+
+        return $canvas;
+    }
+
+    private function saveNormalized(GdImage $image, string $relativePath, $disk): ?string
+    {
+        $format = strtolower((string) config('services.featured_image.output_format', 'webp'));
+        $finalRelativePath = $this->outputPathFor($relativePath, $format);
+        $saved = $this->saveImage($image, $disk->path($finalRelativePath), $format);
+
+        if (! $saved) {
+            return null;
+        }
+
+        if ($finalRelativePath !== $relativePath && $disk->exists($relativePath)) {
+            $disk->delete($relativePath);
+        }
+
+        return $finalRelativePath;
+    }
+
+    private function outputPathFor(string $relativePath, string $format): string
+    {
+        $format = match ($format) {
+            'jpeg' => 'jpg',
+            'jpg', 'png', 'webp' => $format,
+            default => 'webp',
+        };
+
+        $directory = \dirname($relativePath);
+        $filename = pathinfo($relativePath, PATHINFO_FILENAME);
+        $prefix = $directory !== '.' ? $directory.'/' : '';
+
+        return $prefix.$filename.'.'.$format;
+    }
+
+    private function saveImage(GdImage $image, string $path, string $format): bool
+    {
+        $quality = (int) config('services.featured_image.output_quality', 85);
+
+        return match ($format) {
             'png' => \imagepng($image, $path),
-            'webp' => \function_exists('imagewebp') ? \imagewebp($image, $path, 90) : false,
-            'gif' => \imagegif($image, $path),
-            default => \imagejpeg($image, $path, 90),
+            'webp' => \function_exists('imagewebp') ? \imagewebp($image, $path, max(1, min(100, $quality))) : false,
+            'jpg', 'jpeg' => \imagejpeg($image, $path, max(1, min(100, $quality))),
+            default => \function_exists('imagewebp')
+                ? \imagewebp($image, $path, max(1, min(100, $quality)))
+                : \imagejpeg($image, $path, max(1, min(100, $quality))),
         };
     }
 
