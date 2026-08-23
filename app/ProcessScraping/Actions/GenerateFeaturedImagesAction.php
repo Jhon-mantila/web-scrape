@@ -6,6 +6,7 @@ use App\Models\News;
 use App\ProcessScraping\Images\Generators\ComfyUIClient;
 use App\ProcessScraping\Images\Generators\FeaturedImagePromptBuilder;
 use App\ProcessScraping\Images\Generators\FluxSchnellWorkflow;
+use App\ProcessScraping\Images\FeaturedImageWatermarker;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
@@ -16,6 +17,7 @@ class GenerateFeaturedImagesAction
         private readonly ComfyUIClient $comfyui,
         private readonly FluxSchnellWorkflow $workflow,
         private readonly FeaturedImagePromptBuilder $promptBuilder,
+        private readonly FeaturedImageWatermarker $watermarker,
     ) {}
 
     /**
@@ -52,6 +54,10 @@ class GenerateFeaturedImagesAction
                 'skipped' => $skipped++,
                 default => $failed++,
             };
+        }
+
+        if ($generated > 0 && config('services.comfyui.free_memory_after_images')) {
+            $this->comfyui->freeMemory();
         }
 
         return compact('processed', 'generated', 'skipped', 'failed');
@@ -91,6 +97,8 @@ class GenerateFeaturedImagesAction
             if ($path === null) {
                 return 'failed';
             }
+
+            $this->watermarker->apply($path);
 
             $news->detail?->update([
                 'featured_image_path' => $path,

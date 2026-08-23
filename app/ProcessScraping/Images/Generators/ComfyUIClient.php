@@ -106,6 +106,73 @@ class ComfyUIClient
         return $response->body();
     }
 
+    public function waitForQueueIdle(int $timeoutSeconds = 180): bool
+    {
+        $deadline = microtime(true) + max($timeoutSeconds, 10);
+
+        while (microtime(true) < $deadline) {
+            try {
+                $response = Http::timeout(5)
+                    ->acceptJson()
+                    ->get($this->baseUrl().'/queue');
+            } catch (\Throwable) {
+                usleep(500_000);
+
+                continue;
+            }
+
+            if ($response->successful()) {
+                $running = $response->json('queue_running') ?? [];
+                $pending = $response->json('queue_pending') ?? [];
+
+                if ($running === [] && $pending === []) {
+                    return true;
+                }
+            }
+
+            usleep(500_000);
+        }
+
+        return false;
+    }
+
+    public function freeMemory(): bool
+    {
+        if (! $this->isEnabled() || ! $this->isReachable()) {
+            return false;
+        }
+
+        $this->waitForQueueIdle(180);
+
+        try {
+            $response = Http::timeout(15)
+                ->acceptJson()
+                ->post($this->baseUrl().'/free', [
+                    'unload_models' => true,
+                    'free_memory' => true,
+                ]);
+        } catch (\Throwable $e) {
+            Log::warning('comfyui: fallo al liberar memoria', ['error' => $e->getMessage()]);
+
+            return false;
+        }
+
+        if ($response->failed()) {
+            Log::warning('comfyui: /free HTTP '.$response->status(), ['body' => $response->body()]);
+
+            return false;
+        }
+
+        $waitSeconds = max(0, (int) config('services.comfyui.free_memory_wait_seconds', 8));
+        if ($waitSeconds > 0) {
+            sleep($waitSeconds);
+        }
+
+        Log::info('comfyui: modelos descargados de VRAM (listo para Ollama)');
+
+        return true;
+    }
+
     /**
      * @return array<string, mixed>|null
      */

@@ -45,6 +45,7 @@ return [
         'temperature' => (float) env('OLLAMA_TEMPERATURE', 0.75),
         'num_ctx' => (int) env('OLLAMA_NUM_CTX', 16384),
         'num_predict' => (int) env('OLLAMA_NUM_PREDICT', 4096),
+        'unload_after_generate' => filter_var(env('OLLAMA_UNLOAD_AFTER_GENERATE', true), FILTER_VALIDATE_BOOLEAN),
     ],
 
     'wordpress' => [
@@ -86,6 +87,22 @@ return [
             'COMFYUI_PROMPT_TEMPLATE',
             'anime illustration, {title}, {category} theme, vibrant colors, cinematic lighting, detailed background, no text, no watermark, no logos'
         ),
+        'free_memory_after_images' => filter_var(env('COMFYUI_FREE_MEMORY_AFTER_IMAGES', true), FILTER_VALIDATE_BOOLEAN),
+        'free_memory_wait_seconds' => (int) env('COMFYUI_FREE_MEMORY_WAIT_SECONDS', 8),
+    ],
+
+    'featured_image' => [
+        'watermark_enabled' => filter_var(env('FEATURED_IMAGE_WATERMARK_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+        'watermark_path' => env('FEATURED_IMAGE_WATERMARK_PATH', storage_path('app/public/Logo/esquina_anime_logo.png')),
+        'watermark_position' => env('FEATURED_IMAGE_WATERMARK_POSITION', 'bottom-left'),
+        'watermark_margin' => (int) env('FEATURED_IMAGE_WATERMARK_MARGIN', 24),
+        'watermark_margin_bottom' => (int) env('FEATURED_IMAGE_WATERMARK_MARGIN_BOTTOM', 0),
+        'watermark_width_percent' => (float) env('FEATURED_IMAGE_WATERMARK_WIDTH_PERCENT', 22),
+        'watermark_opacity' => (int) env('FEATURED_IMAGE_WATERMARK_OPACITY', 90),
+        'watermark_mask_enabled' => filter_var(env('FEATURED_IMAGE_WATERMARK_MASK_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+        'watermark_mask_opacity' => (int) env('FEATURED_IMAGE_WATERMARK_MASK_OPACITY', 50),
+        'watermark_mask_padding' => (int) env('FEATURED_IMAGE_WATERMARK_MASK_PADDING', 14),
+        'watermark_mask_full_width' => filter_var(env('FEATURED_IMAGE_WATERMARK_MASK_FULL_WIDTH', true), FILTER_VALIDATE_BOOLEAN),
     ],
 
 ];

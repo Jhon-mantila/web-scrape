@@ -3,6 +3,7 @@
 namespace App\ProcessScraping\Ai;
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class OllamaClient
@@ -57,5 +58,36 @@ class OllamaClient
         }
 
         return (string) ($response->json('response') ?? '');
+    }
+
+    public function unloadModels(?string $model = null): void
+    {
+        $models = array_values(array_unique(array_filter([
+            $model,
+            config('services.ollama.model'),
+            config('services.ollama.model_premium'),
+        ])));
+
+        foreach ($models as $name) {
+            if ($name === null || $name === '') {
+                continue;
+            }
+
+            try {
+                Http::timeout(15)
+                    ->acceptJson()
+                    ->post(rtrim(config('services.ollama.url'), '/').'/api/generate', [
+                        'model' => $name,
+                        'keep_alive' => 0,
+                    ]);
+            } catch (\Throwable $e) {
+                Log::warning('ollama: no se pudo descargar modelo', [
+                    'model' => $name,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        Log::info('ollama: modelos descargados de RAM (listo para ComfyUI)');
     }
 }

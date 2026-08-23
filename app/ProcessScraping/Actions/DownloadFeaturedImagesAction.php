@@ -4,6 +4,7 @@ namespace App\ProcessScraping\Actions;
 
 use App\Models\News;
 use App\ProcessScraping\Images\FeaturedImageExtractor;
+use App\ProcessScraping\Images\FeaturedImageWatermarker;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -14,6 +15,7 @@ class DownloadFeaturedImagesAction
     public function __construct(
         private readonly FeaturedImageExtractor $extractor,
         private readonly GenerateFeaturedImagesAction $generateImages,
+        private readonly FeaturedImageWatermarker $watermarker,
     ) {}
 
     /**
@@ -120,6 +122,8 @@ class DownloadFeaturedImagesAction
                 'featured_image_path' => $path,
                 'featured_image_source' => 'scraped',
             ]);
+
+            $this->watermarker->apply($path);
 
             return 'success';
         } catch (Throwable $e) {

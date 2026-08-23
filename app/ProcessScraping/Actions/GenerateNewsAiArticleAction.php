@@ -27,32 +27,15 @@ class GenerateNewsAiArticleAction
     /**
      * @return array{processed: int, success: int, failed: int, news_ids: list<int>, errors: list<array{news_id: int, message: string}>}
      */
-    public function execute(int $limit, bool $force, bool $includeRawHtml): array
+    public function execute(int $limit, bool $force, bool $includeRawHtml, ?array $newsIds = null): array
     {
         $processed = 0;
         $success = 0;
         $failed = 0;
-        $newsIds = [];
+        $successNewsIds = [];
         $errors = [];
 
-        $query = News::query()
-            ->select('news.*')
-            ->join('news_details as nd', 'nd.news_id', '=', 'news.id')
-            ->whereNotNull('nd.raw_html')
-            ->whereNotNull('nd.content_text')
-            ->where('nd.status', 'processed')
-            ->with('detail')
-            ->orderBy('news.id');
-
-        if (! $force) {
-            $query->where(function ($q) {
-                $q->whereNull('news.status_ia')
-                    ->orWhere('news.status_ia', 'failed');
-            });
-        }
-
-        /** @var iterable<News> $items */
-        $items = $query->limit($limit)->get();
+        $items = $this->resolveItems($limit, $force, $newsIds);
 
         foreach ($items as $news) {
             $processed++;
@@ -163,7 +146,7 @@ class GenerateNewsAiArticleAction
                 });
 
                 $success++;
-                $newsIds[] = $news->id;
+                $successNewsIds[] = $news->id;
             } catch (Throwable $e) {
                 $failed++;
                 $news->update(['status_ia' => 'failed']);
@@ -180,8 +163,41 @@ class GenerateNewsAiArticleAction
             'processed' => $processed,
             'success' => $success,
             'failed' => $failed,
-            'news_ids' => $newsIds,
+            'news_ids' => $successNewsIds,
             'errors' => $errors,
         ];
+    }
+
+    /**
+     * @param  list<int>|null  $newsIds
+     * @return \Illuminate\Support\Collection<int, News>
+     */
+    private function resolveItems(int $limit, bool $force, ?array $newsIds)
+    {
+        $query = News::query()
+            ->select('news.*')
+            ->join('news_details as nd', 'nd.news_id', '=', 'news.id')
+            ->whereNotNull('nd.raw_html')
+            ->whereNotNull('nd.content_text')
+            ->where('nd.status', 'processed')
+            ->with('detail')
+            ->orderBy('news.id');
+
+        if (! $force) {
+            $query->where(function ($q) {
+                $q->whereNull('news.status_ia')
+                    ->orWhere('news.status_ia', 'failed');
+            });
+        }
+
+        if ($newsIds !== null) {
+            if ($newsIds === []) {
+                return collect();
+            }
+
+            return $query->whereIn('news.id', $newsIds)->get();
+        }
+
+        return $query->limit(max($limit, 1))->get();
     }
 }

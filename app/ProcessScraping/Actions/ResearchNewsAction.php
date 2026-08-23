@@ -20,7 +20,7 @@ class ResearchNewsAction
     /**
      * @return array{processed: int, success: int, skipped: int, failed: int}
      */
-    public function execute(int $limit, bool $force): array
+    public function execute(int $limit, bool $force, ?array $newsIds = null): array
     {
         if (! config('services.searxng.enabled')) {
             return ['processed' => 0, 'success' => 0, 'skipped' => 0, 'failed' => 0];
@@ -31,20 +31,9 @@ class ResearchNewsAction
         $skipped = 0;
         $failed = 0;
 
-        $query = News::query()
-            ->whereHas('detail', function ($q) use ($force) {
-                $q->where('status', 'processed')
-                    ->whereNotNull('content_text');
+        $items = $this->resolveItems($limit, $force, $newsIds);
 
-                if (! $force) {
-                    $q->whereNull('research_context');
-                }
-            })
-            ->with('detail')
-            ->orderBy('id')
-            ->limit(max($limit, 1));
-
-        foreach ($query->get() as $news) {
+        foreach ($items as $news) {
             $processed++;
 
             try {
@@ -72,6 +61,47 @@ class ResearchNewsAction
         }
 
         return compact('processed', 'success', 'skipped', 'failed');
+    }
+
+    /**
+     * @param  list<int>|null  $newsIds
+     * @return \Illuminate\Support\Collection<int, News>
+     */
+    private function resolveItems(int $limit, bool $force, ?array $newsIds)
+    {
+        if ($newsIds !== null) {
+            if ($newsIds === []) {
+                return collect();
+            }
+
+            return News::query()
+                ->whereIn('id', $newsIds)
+                ->whereHas('detail', function ($q) use ($force) {
+                    $q->where('status', 'processed')
+                        ->whereNotNull('content_text');
+
+                    if (! $force) {
+                        $q->whereNull('research_context');
+                    }
+                })
+                ->with('detail')
+                ->orderBy('id')
+                ->get();
+        }
+
+        return News::query()
+            ->whereHas('detail', function ($q) use ($force) {
+                $q->where('status', 'processed')
+                    ->whereNotNull('content_text');
+
+                if (! $force) {
+                    $q->whereNull('research_context');
+                }
+            })
+            ->with('detail')
+            ->orderBy('id')
+            ->limit(max($limit, 1))
+            ->get();
     }
 
     /**
