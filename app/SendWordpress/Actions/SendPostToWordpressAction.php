@@ -69,10 +69,16 @@ class SendPostToWordpressAction
                 $categoryName = $article->news->category ?? 'General';
                 $categoryId = $this->client->getOrCreateCategory($categoryName, $account);
 
-                $allowedEmbeds = YoutubeExtractor::extract($article->news->detail?->raw_html);
+                $allowedEmbeds = YoutubeExtractor::collect(
+                    $article->news->detail?->raw_html,
+                    $article->news->detail?->research_context,
+                    $article->news->detail?->research_raw,
+                );
+
+                $postTitle = trim((string) ($article->generated_title ?? ''));
 
                 $payload = [
-                    'title' => $article->generated_title ?? $article->source_title,
+                    'title' => $postTitle,
                     'content' => HtmlArticleSanitizer::sanitize($article->body_html, $allowedEmbeds),
                     'excerpt' => $article->excerpt,
                     'status' => $status,
@@ -89,7 +95,7 @@ class SendPostToWordpressAction
                     ];
                 }
 
-                $featuredMediaId = $this->resolveFeaturedMediaId($article, $account);
+                $featuredMediaId = $this->resolveFeaturedMediaId($article, $account, $postTitle);
                 if ($featuredMediaId !== null) {
                     $payload['featured_media'] = $featuredMediaId;
                 }
@@ -134,7 +140,7 @@ class SendPostToWordpressAction
         ];
     }
 
-    private function resolveFeaturedMediaId(NewsAiArticle $article, WordPressAccount $account): ?int
+    private function resolveFeaturedMediaId(NewsAiArticle $article, WordPressAccount $account, string $title): ?int
     {
         $article->loadMissing('news.detail');
         $imagePath = $article->news->detail?->featured_image_path;
@@ -161,7 +167,7 @@ class SendPostToWordpressAction
         $fullPath = Storage::disk('public')->path($imagePath);
 
         try {
-            $media = $this->client->uploadMedia($fullPath, basename($imagePath), $account);
+            $media = $this->client->uploadMedia($fullPath, basename($imagePath), $account, $title);
             $mediaId = $media['id'] ?? null;
 
             Log::info('wordpress: imagen destacada subida', [
@@ -169,6 +175,8 @@ class SendPostToWordpressAction
                 'media_id' => $mediaId,
                 'path' => $imagePath,
                 'author' => $account->user,
+                'media_title' => $title,
+                'alt_text' => $media['alt_text'] ?? $title,
             ]);
 
             return $mediaId;

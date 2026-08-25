@@ -289,6 +289,37 @@ class HtmlArticleSanitizer
         return trim($html);
     }
 
+    /**
+     * Inserta un embed permitido si el HTML aún no contiene YouTube.
+     *
+     * @param  list<string>  $allowedEmbedUrls
+     */
+    public static function ensureYoutubeEmbed(?string $html, array $allowedEmbedUrls): ?string
+    {
+        if ($html === null || trim($html) === '' || $allowedEmbedUrls === []) {
+            return $html;
+        }
+
+        if (str_contains(mb_strtolower($html), 'youtube.com/embed')) {
+            return $html;
+        }
+
+        $allowedIds = self::extractVideoIds($allowedEmbedUrls);
+        if ($allowedIds === []) {
+            return $html;
+        }
+
+        $embed = self::buildCompactEmbed('https://www.youtube.com/embed/'.$allowedIds[0]);
+
+        if (preg_match('/<\/p>/i', $html, $match, PREG_OFFSET_CAPTURE)) {
+            $pos = $match[0][1] + strlen($match[0][0]);
+
+            return substr($html, 0, $pos).$embed.substr($html, $pos);
+        }
+
+        return $embed.$html;
+    }
+
     private static function removeProblematicAttributes(string $html): string
     {
         $html = preg_replace('/\salign="center"/i', '', $html);

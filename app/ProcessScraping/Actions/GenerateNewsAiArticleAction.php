@@ -55,7 +55,11 @@ class GenerateNewsAiArticleAction
                     $news->category,
                 );
 
-                $youtubeEmbeds = YoutubeExtractor::extract($detail->raw_html ?? null);
+                $youtubeEmbeds = YoutubeExtractor::collect(
+                    $detail->raw_html ?? null,
+                    $detail->research_context,
+                    $detail->research_raw,
+                );
                 $model = $this->modelSelector->forNews($news, $detail->content_text);
                 $researchContext = $detail->research_context;
 
@@ -126,6 +130,7 @@ class GenerateNewsAiArticleAction
                 }
 
                 $parts['body_html'] = HtmlArticleSanitizer::sanitize($parts['body_html'], $youtubeEmbeds);
+                $parts['body_html'] = HtmlArticleSanitizer::ensureYoutubeEmbed($parts['body_html'], $youtubeEmbeds);
 
                 DB::transaction(function () use ($news, $parts, $articleType, $body, $model): void {
                     NewsAiArticle::updateOrCreate(

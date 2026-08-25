@@ -13,15 +13,19 @@ class ResearchContextFormatter
             return null;
         }
 
-        $blocks = [
-            'CONTEXTO DE INVESTIGACIÓN WEB (complemento; NO reemplaza la fuente original):',
-            'Usa solo hechos que aparezcan aquí o en el contenido de referencia. Si hay conflicto, prioriza la fuente scrapeada.',
-            '',
-        ];
+        $blocks = [];
+        $hasResults = false;
 
         foreach ($searches as $search) {
             if ($search['results'] === []) {
                 continue;
+            }
+
+            if (! $hasResults) {
+                $blocks[] = 'CONTEXTO DE INVESTIGACIÓN WEB (complemento; NO reemplaza la fuente original):';
+                $blocks[] = 'Usa solo hechos que aparezcan aquí o en el contenido de referencia. Si hay conflicto, prioriza la fuente scrapeada.';
+                $blocks[] = '';
+                $hasResults = true;
             }
 
             $blocks[] = 'Búsqueda: "'.$search['query'].'"';
@@ -39,8 +43,10 @@ class ResearchContextFormatter
             $blocks[] = '';
         }
 
-        $text = trim(implode("\n", $blocks));
+        if (! $hasResults) {
+            return null;
+        }
 
-        return $text === '' ? null : $text;
+        return trim(implode("\n", $blocks));
     }
 }

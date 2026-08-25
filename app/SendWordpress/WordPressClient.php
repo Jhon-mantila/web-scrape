@@ -24,22 +24,58 @@ class WordPressClient
         return $response->json();
     }
 
-    public function uploadMedia(string $filePath, string $filename, ?WordPressAccount $account = null): array
-    {
+    public function uploadMedia(
+        string $filePath,
+        string $filename,
+        ?WordPressAccount $account = null,
+        ?string $title = null,
+    ): array {
         $url = config('services.wordpress.url').'/wp-json/wp/v2/media';
 
-        $response = $this->http($account)
+        $request = $this->http($account)
             ->timeout(120)
             ->attach(
                 'file',
                 file_get_contents($filePath),
                 $filename,
                 ['Content-Type' => mime_content_type($filePath) ?: 'image/jpeg']
-            )
-            ->post($url);
+            );
+
+        if ($title !== null && $title !== '') {
+            $request = $request->attach('title', $title)->attach('alt_text', $title);
+        }
+
+        $response = $request->post($url);
 
         if ($response->failed()) {
             throw new RuntimeException('Error subiendo media a WordPress: '.$response->body());
+        }
+
+        $media = $response->json();
+
+        if ($title !== null && $title !== '' && isset($media['id'])) {
+            $media = $this->updateMedia((int) $media['id'], [
+                'title' => $title,
+                'alt_text' => $title,
+            ], $account);
+        }
+
+        return $media;
+    }
+
+    /**
+     * @param  array{title?: string, alt_text?: string, caption?: string}  $data
+     */
+    public function updateMedia(int $mediaId, array $data, ?WordPressAccount $account = null): array
+    {
+        $url = config('services.wordpress.url').'/wp-json/wp/v2/media/'.$mediaId;
+
+        $response = $this->http($account)
+            ->timeout(30)
+            ->post($url, $data);
+
+        if ($response->failed()) {
+            throw new RuntimeException('Error actualizando media en WordPress: '.$response->body());
         }
 
         return $response->json();

@@ -67,6 +67,7 @@ return [
         'url' => env('SEARXNG_URL', 'http://searxng:8080'),
         'timeout' => (int) env('SEARXNG_TIMEOUT', 20),
         'language' => env('SEARXNG_LANGUAGE', 'es-ES'),
+        'engines' => env('SEARXNG_ENGINES', 'yandex,bing'),
         'max_queries' => (int) env('SEARXNG_MAX_QUERIES', 3),
         'results_per_query' => (int) env('SEARXNG_RESULTS_PER_QUERY', 3),
     ],

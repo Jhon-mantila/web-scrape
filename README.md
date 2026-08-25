@@ -79,6 +79,7 @@ SearXNG queda en: `http://localhost:8080`
 ```env
 SEARXNG_ENABLED=true
 SEARXNG_URL=http://searxng:8080
+SEARXNG_ENGINES=yandex,bing
 SEARXNG_MAX_QUERIES=3
 SEARXNG_RESULTS_PER_QUERY=3
 
@@ -372,6 +373,86 @@ docker exec -it laravel_app php artisan news:pipeline --limit=5 --force --includ
 docker exec -it laravel_app php artisan news:pipeline --limit=5 --skip-generate --skip-research --mode=draft
 ```
 
+#### Ejemplo — Pipeline con `--mode=schedule`
+
+Procesa noticias y las **programa en WordPress** respetando el máximo por día y el intervalo entre posts (no publica todo de golpe).
+
+**1. Variables en `.env` (ejemplo):**
+
+```env
+WORDPRESS_URL=https://esquinaanime.com
+WORDPRESS_USER=autor1
+WORDPRESS_PASSWORD=app_password_1
+WORDPRESS_USER_2=autor2
+WORDPRESS_PASSWORD_2=app_password_2
+
+WORDPRESS_SCHEDULE_TIMEZONE=America/Bogota
+WORDPRESS_SCHEDULE_MAX_PER_DAY=5
+WORDPRESS_SCHEDULE_START_HOUR=9
+WORDPRESS_SCHEDULE_START_MINUTE=0
+WORDPRESS_SCHEDULE_INTERVAL_HOURS=3
+WORDPRESS_SCHEDULE_INTERVAL_MIN_HOURS=2
+```
+
+Con esto: máximo **5 posts/día**, primer slot **9:00**, separados **2–3 h** (~9:00, 12:00, 15:00, 18:00, 21:00).
+
+**2. Primera corrida completa (scrape + IA + programar 20 artículos):**
+
+```bash
+docker exec -it laravel_app php artisan config:clear
+docker exec -it laravel_app php artisan news:pipeline --limit=20 --mode=schedule --include-raw-html --show-errors
+```
+
+**3. Reprocesar sin scrapear (noticias ya en BD, programar 15 pendientes):**
+
+```bash
+docker exec -it laravel_app php artisan news:pipeline --limit=15 --skip-scrape --mode=schedule --include-raw-html --show-errors
+```
+
+**4. Salida esperada (resumen):**
+
+```
+Pipeline iniciado (limit=20, mode=schedule)
+
+1. Scrape listado: 8 URLs nuevas — 12 seg
+2. Detalles — procesadas: 20 | OK: 20 | fallidas: 0 — 1 min 5 seg
+3. Imágenes — procesadas: 20 | descargadas: 18 | generadas (FLUX): 2 | ... — 45 seg
+4. Investigación — procesadas: 20 | OK: 20 | ... — 2 min 10 seg
+5. IA — procesadas: 20 | OK: 20 | fallidas: 0 — 25 min 30 seg
+6. WordPress — procesadas: 20 | OK: 20 | fallidas: 0 | autores: autor1: 10, autor2: 10 — 3 min
+
+Pipeline finalizado.
+Tiempo total: 32 min 42 seg
+```
+
+En `news:send-wordpress --mode=schedule` verías además cada fecha:
+
+```
+Programaciones asignadas:
+  news_id=101 → 2026-08-24T09:00:00-05:00 (autor1)
+  news_id=102 → 2026-08-24T12:00:00-05:00 (autor2)
+  ...
+  news_id=106 → 2026-08-25T09:00:00-05:00 (autor1)
+```
+
+**5. Cómo reparte 20 artículos con `MAX_PER_DAY=5`:**
+
+| Día | Posts programados |
+|-----|-------------------|
+| Día 1 | 5 (9:00 – 21:00) |
+| Día 2 | 5 |
+| Día 3 | 5 |
+| Día 4 | 5 |
+| **Total** | **20** en 4 días |
+
+Si WordPress ya tiene 3 posts publicados/programados hoy, ese día solo agrega **2** más y el resto pasa al día siguiente.
+
+**6. Solo programar (sin reprocesar IA)** — artículos IA ya generados:
+
+```bash
+docker exec -it laravel_app php artisan news:send-wordpress --limit=20 --mode=schedule
+```
+
 
 
 #### Servicios que deben estar activos
@@ -466,9 +547,132 @@ docker exec -it laravel_app php artisan news:pipeline --limit=5 --include-raw-ht
 | -------------------------------------------- | ------------------------------------------ |
 | Reprocesar imágenes/IA sin volver a scrapear | `news:reset-processing --force`            |
 | Empezar de cero (BD + imágenes)              | `news:reset-processing --truncate --force` |
+| Vaciar WordPress y volver a publicar         | Ver sección **Limpiar WordPress** abajo    |
 
+---
 
+### Limpiar WordPress por completo
 
+Guía para **borrar todos los posts y medios** en WordPress (publicados, borradores y programados) y volver a enviar desde Laravel.
+
+#### Qué se borra y qué no
+
+| Se borra | No se borra |
+| -------- | ----------- |
+| Posts (`post`) en cualquier estado: `publish`, `draft`, `future`, `pending` | Tema (`wp-content/themes/`) |
+| Imágenes/archivos subidos (`attachment`) | Plugins |
+| | Categorías, menús, widgets, usuarios |
+| | Contenido en Laravel (salvo que tú lo resetees) |
+
+> Haz **copia de seguridad** del servidor o exporta desde WordPress antes si no estás seguro.
+
+#### Requisito: WP-CLI en el servidor
+
+Conéctate por SSH al hosting donde está WordPress. Necesitas [WP-CLI](https://wp-cli.org/) instalado.
+
+```bash
+ssh usuario@tu-servidor
+cd /ruta/a/wordpress   # carpeta donde está wp-config.php
+wp --info
+```
+
+Si `wp` no existe, instálalo (ejemplo en Linux):
+
+```bash
+curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+chmod +x wp-cli.phar
+sudo mv wp-cli.phar /usr/local/bin/wp
+wp --info
+```
+
+#### Paso 1 — Comprobar cuántos hay
+
+En muchos servidores hay que usar `--allow-root` si entras como root:
+
+```bash
+cd /ruta/a/wordpress
+
+wp --info --allow-root
+wp post list --post_type=post --post_status=any --format=count --allow-root
+wp post list --post_type=attachment --format=count --allow-root
+```
+
+#### Paso 2 — Borrar posts y medios
+
+Equivalente a los comandos con `$(wp post list ...)`, pero con `xargs -r` (no falla si la lista está vacía):
+
+```bash
+wp post list --post_type=post --post_status=any --posts_per_page=-1 --format=ids --allow-root \
+  | xargs -r wp post delete --force --allow-root
+
+wp post list --post_type=attachment --posts_per_page=-1 --format=ids --allow-root \
+  | xargs -r wp post delete --force --allow-root
+```
+
+Incluye publicados, borradores y **programados** (`future`). `--posts_per_page=-1` asegura borrar todos aunque haya muchos.
+
+Si no hay posts o medios, `xargs -r` no ejecuta nada (sin error).
+
+WordPress quedó vacío, pero Laravel sigue marcando artículos como ya enviados (`sent_wordpress = 1`). Elige **una** opción:
+
+**Opción A — Re-enviar los mismos artículos IA** (sin regenerar IA ni re-scrapear):
+
+```bash
+docker exec mysql_db mysql -uroot -proot anime -e \
+  "UPDATE news_ai_articles SET sent_wordpress = 0, sent_wordpress_at = NULL;"
+```
+
+**Opción B — Reset suave en Laravel** (conserva scrape + regenera imágenes, investigación e IA):
+
+```bash
+docker exec -it laravel_app php artisan news:reset-processing --force
+```
+
+Después reprocesa sin scrapear:
+
+```bash
+docker exec -it laravel_app php artisan news:pipeline --limit=20 --skip-scrape --include-raw-html --mode=schedule
+```
+
+**Opción C — Empezar de cero también en Laravel** (pierdes scrape, investigación e IA):
+
+```bash
+docker exec -it laravel_app php artisan news:reset-processing --truncate --force
+docker exec -it laravel_app php artisan scrape:news
+docker exec -it laravel_app php artisan news:pipeline --limit=20 --include-raw-html --mode=schedule
+```
+
+#### Paso 4 — Volver a publicar en WordPress
+
+Con la **opción A** (artículos IA ya generados):
+
+```bash
+docker exec -it laravel_app php artisan news:send-wordpress --limit=30 --mode=schedule
+# o --mode=draft / --mode=publish
+```
+
+Comprueba en el panel de WordPress que no queden posts viejos y que los nuevos aparecen con las fechas programadas.
+
+#### Resumen rápido (solo WordPress + re-envío)
+
+```bash
+# 1. En el servidor (SSH)
+cd /ruta/a/wordpress
+wp --info --allow-root
+wp post list --post_type=post --post_status=any --format=count --allow-root
+wp post list --post_type=attachment --format=count --allow-root
+wp post list --post_type=post --post_status=any --posts_per_page=-1 --format=ids --allow-root \
+  | xargs -r wp post delete --force --allow-root
+wp post list --post_type=attachment --posts_per_page=-1 --format=ids --allow-root \
+  | xargs -r wp post delete --force --allow-root
+
+# 2. En tu máquina (Laravel / Docker)
+docker exec mysql_db mysql -uroot -proot anime -e \
+  "UPDATE news_ai_articles SET sent_wordpress = 0, sent_wordpress_at = NULL;"
+docker exec -it laravel_app php artisan news:send-wordpress --limit=30 --mode=schedule
+```
+
+---
 
 ### Validar comandos disponibles
 

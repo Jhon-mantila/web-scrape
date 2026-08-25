@@ -41,6 +41,10 @@ class ResearchNewsAction
 
                 if ($result === null) {
                     $skipped++;
+                    Log::info('research: sin resultados web', [
+                        'news_id' => $news->id,
+                        'title' => $news->title,
+                    ]);
                     continue;
                 }
 
