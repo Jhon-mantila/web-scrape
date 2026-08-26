@@ -13,6 +13,71 @@ Proyecto en Laravel para:
 - MySQL 8 (Docker)
 - phpMyAdmin (Docker)
 - Ollama (host local)
+- **Inertia.js + Vue 3** (panel Esquina AI — publicación de videos)
+
+### Arquitectura `app/SocialPublishing/`
+
+```
+SocialPublishing/
+├── Contracts/        # SocialPublisherInterface (cada red implementa lo mismo)
+├── Platforms/        # YouTube, Facebook (×2), TikTok (stub)
+├── Actions/          # Generar captions IA, publicar manualmente
+├── Prompts/          # Prompts Ollama por plataforma
+├── Registry/         # Registro de publishers (plugin-style)
+└── Enums/            # Platform, PublicationStatus
+```
+
+### Panel Esquina AI (videos → redes)
+
+Interfaz web en `/dashboard` (requiere login). Por ahora activo: **Videos**.
+
+```bash
+# Dentro del contenedor (primera vez)
+docker exec -it laravel_app php artisan migrate
+docker exec -it laravel_app php artisan storage:link
+
+# Frontend (host o contenedor)
+npm install
+npm run build
+# desarrollo: npm run dev
+```
+
+1. Registra usuarios en `/register` (tú y Jessika).
+2. **Videos → Subir video** (mp4 + thumbnail + plataformas).
+3. **Generar textos con IA** (Ollama, prompt distinto por red).
+4. Revisa/edita captions → **Enviar** (publicación manual, sin cola).
+
+Variables `.env` (publicación social):
+
+```env
+SOCIAL_MAX_VIDEO_MB=500
+
+# YouTube OAuth (subir videos — API key sola no alcanza)
+YOUTUBE_CLIENT_ID=
+YOUTUBE_CLIENT_SECRET=
+YOUTUBE_REDIRECT_URI=
+YOUTUBE_REFRESH_TOKEN=
+YOUTUBE_CHANNEL_ID=UCosCkg76aWQ6r3-n9AvQePw
+
+# Facebook Esquinaweb (cuenta Meta A)
+FACEBOOK_ESQUINAWEB_APP_ID=
+FACEBOOK_ESQUINAWEB_APP_SECRET=
+FACEBOOK_ESQUINAWEB_PAGE_ID=
+FACEBOOK_ESQUINAWEB_PAGE_TOKEN=
+
+# Facebook Esquinagamers (cuenta Meta B)
+FACEBOOK_ESQUINAGAMERS_APP_ID=
+FACEBOOK_ESQUINAGAMERS_APP_SECRET=
+FACEBOOK_ESQUINAGAMERS_PAGE_ID=
+FACEBOOK_ESQUINAGAMERS_PAGE_TOKEN=
+
+# Modelos Ollama por plataforma (opcional)
+SOCIAL_YOUTUBE_MODEL=gemma4:12b
+SOCIAL_FACEBOOK_ESQUINAWEB_MODEL=gemma4:12b
+SOCIAL_FACEBOOK_ESQUINAGAMERS_MODEL=gemma4:12b
+```
+
+TikTok: visible en UI como **Próximamente** (sin API en v1).
 
 ### Arquitectura `app/ProcessScraping/`
 

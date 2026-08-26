@@ -9,6 +9,8 @@ services:
       - "8000:80"
     volumes:
       - .:/var/www/html
+      - ./docker/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+      - ./docker/apache/laravel.conf:/etc/apache2/conf-enabled/laravel.conf:ro
     depends_on:
       - mysql_db
       - searxng
