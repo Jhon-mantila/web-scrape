@@ -1,21 +1,27 @@
 <script setup>
 import { Link, router, useForm } from '@inertiajs/vue3';
-import { computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
 const props = defineProps({
     video: Object,
 });
 
+const thumbnailInput = ref(null);
+const thumbnailPreview = ref(null);
+
 const form = useForm({
     title: props.video.title,
     notes: props.video.notes || '',
+    thumbnail: null,
     publications: props.video.publications.map((p) => ({
         id: p.id,
         caption_edited: p.caption_edited || p.caption_generated || '',
         scheduled_at: p.scheduled_at ? p.scheduled_at.slice(0, 16) : '',
     })),
 });
+
+const displayThumbnail = computed(() => thumbnailPreview.value || props.video.thumbnail_url);
 
 const publishableCount = computed(() =>
     props.video.publications.filter(
@@ -28,6 +34,11 @@ watch(
     (video) => {
         form.title = video.title;
         form.notes = video.notes || '';
+        form.thumbnail = null;
+        thumbnailPreview.value = null;
+        if (thumbnailInput.value) {
+            thumbnailInput.value.value = '';
+        }
         form.publications = video.publications.map((p) => ({
             id: p.id,
             caption_edited: p.caption_edited || p.caption_generated || '',
@@ -43,8 +54,31 @@ const payload = () => ({
     publications: form.publications,
 });
 
+function onThumbnailChange(event) {
+    const file = event.target.files?.[0] ?? null;
+    form.thumbnail = file;
+
+    if (thumbnailPreview.value) {
+        URL.revokeObjectURL(thumbnailPreview.value);
+    }
+
+    thumbnailPreview.value = file ? URL.createObjectURL(file) : null;
+}
+
 function save() {
-    form.put(route('videos.update', props.video.id));
+    form.transform((data) => ({
+        ...data,
+        _method: 'put',
+    })).post(route('videos.update', props.video.id), {
+        forceFormData: true,
+        onSuccess: () => {
+            if (thumbnailPreview.value) {
+                URL.revokeObjectURL(thumbnailPreview.value);
+                thumbnailPreview.value = null;
+            }
+            form.thumbnail = null;
+        },
+    });
 }
 
 function generateCaptions() {
@@ -66,6 +100,14 @@ function publishAll() {
 
     router.post(route('videos.publish-all', props.video.id), payload());
 }
+
+function deleteVideo() {
+    if (!confirm(`¿Eliminar "${props.video.title}"? Se borrarán el video, la miniatura y sus publicaciones.`)) {
+        return;
+    }
+
+    router.delete(route('videos.destroy', props.video.id));
+}
 </script>
 
 <template>
@@ -75,19 +117,44 @@ function publishAll() {
                 <Link :href="route('videos.index')" class="text-sm text-slate-400 hover:text-white">← Volver</Link>
                 <h2 class="mt-2 text-2xl font-semibold">{{ form.title }}</h2>
             </div>
-            <button
-                v-if="publishableCount > 0"
-                type="button"
-                class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-500"
-                @click="publishAll"
-            >
-                Enviar a todas ({{ publishableCount }})
-            </button>
+            <div class="flex flex-wrap gap-2">
+                <button
+                    v-if="publishableCount > 0"
+                    type="button"
+                    class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-500"
+                    @click="publishAll"
+                >
+                    Enviar a todas ({{ publishableCount }})
+                </button>
+                <button
+                    type="button"
+                    class="rounded-lg border border-red-900/60 px-4 py-2 text-sm text-red-400 hover:bg-red-950/40"
+                    @click="deleteVideo"
+                >
+                    Eliminar video
+                </button>
+            </div>
         </div>
 
         <div class="grid gap-8 lg:grid-cols-[320px_1fr]">
             <div class="space-y-4">
-                <img :src="video.thumbnail_url" :alt="form.title" class="w-full rounded-2xl object-cover" />
+                <div class="space-y-3">
+                    <img :src="displayThumbnail" :alt="form.title" class="w-full rounded-2xl object-cover" />
+                    <div>
+                        <label class="mb-2 block text-sm text-slate-300">Cambiar miniatura</label>
+                        <input
+                            ref="thumbnailInput"
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            class="block w-full text-sm text-slate-400"
+                            @change="onThumbnailChange"
+                        />
+                        <p v-if="form.errors.thumbnail" class="mt-1 text-sm text-red-400">{{ form.errors.thumbnail }}</p>
+                        <p v-else-if="form.thumbnail" class="mt-1 text-xs text-emerald-400">
+                            Nueva imagen seleccionada. Pulsa «Guardar cambios» para aplicarla.
+                        </p>
+                    </div>
+                </div>
                 <video :src="video.video_url" controls class="w-full rounded-2xl bg-black" />
                 <button
                     type="button"
@@ -148,7 +215,7 @@ function publishAll() {
 
                     <div class="mt-3 grid gap-3 sm:grid-cols-2">
                         <div>
-                            <label class="mb-1 block text-xs text-slate-500">Programar publicación en YouTube</label>
+                            <label class="mb-1 block text-xs text-slate-500">Programar publicación</label>
                             <input
                                 v-model="form.publications[index].scheduled_at"
                                 type="datetime-local"

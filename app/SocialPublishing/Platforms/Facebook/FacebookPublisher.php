@@ -2,6 +2,7 @@
 
 namespace App\SocialPublishing\Platforms\Facebook;
 
+use App\Models\SocialPlatformAccount;
 use App\Models\SocialPublication;
 use App\SocialPublishing\Contracts\SocialPublisherInterface;
 use App\SocialPublishing\DTO\PublishResult;
@@ -23,16 +24,16 @@ class FacebookPublisher implements SocialPublisherInterface
 
     public function isConfigured(): bool
     {
-        $cfg = config("social.facebook.{$this->configKey}");
-
-        return ! empty($cfg['page_id']) && ! empty($cfg['page_access_token']);
+        return $this->pageCredentials() !== null;
     }
 
     public function publish(SocialPublication $publication): PublishResult
     {
-        if (! $this->isConfigured()) {
+        $credentials = $this->pageCredentials();
+
+        if ($credentials === null) {
             return PublishResult::fail(
-                "Facebook ({$this->configKey}) no configurado. Añade PAGE_ID y PAGE_TOKEN en .env."
+                "Facebook ({$this->configKey}) no conectado. Ve a Configuración o añade PAGE_ID y PAGE_TOKEN en .env."
             );
         }
 
@@ -43,20 +44,43 @@ class FacebookPublisher implements SocialPublisherInterface
             return PublishResult::fail('Archivo de video no encontrado.');
         }
 
-        $pageId = config("social.facebook.{$this->configKey}.page_id");
-        $token = config("social.facebook.{$this->configKey}.page_access_token");
-        $videoUrl = $disk->url($video->video_path);
-
-        // Nota: en producción el video debe ser URL pública accesible para Facebook.
-        // Si storage es local, sube vía Graph resumable upload (fase 2) o expón URL pública.
+        $pageId = $credentials['page_id'];
+        $token = $credentials['page_access_token'];
+        $videoPath = $disk->path($video->video_path);
         $caption = $publication->caption() ?? $video->title;
 
         try {
-            $response = Http::post("https://graph.facebook.com/v21.0/{$pageId}/videos", [
-                'file_url' => $videoUrl,
-                'description' => $caption,
-                'access_token' => $token,
-            ]);
+            $request = Http::timeout(600)
+                ->attach(
+                    'source',
+                    fopen($videoPath, 'r'),
+                    basename($videoPath),
+                    ['Content-Type' => 'video/mp4'],
+                );
+
+            if ($disk->exists($video->thumbnail_path)) {
+                $thumbPath = $disk->path($video->thumbnail_path);
+                $thumbMime = mime_content_type($thumbPath) ?: 'image/jpeg';
+
+                $request = $request->attach(
+                    'thumb',
+                    fopen($thumbPath, 'r'),
+                    basename($thumbPath),
+                    ['Content-Type' => $thumbMime],
+                );
+            }
+
+            $response = $request->post(
+                "https://graph-video.facebook.com/v21.0/{$pageId}/videos",
+                array_merge(
+                    [
+                        'access_token' => $token,
+                        'description' => $caption,
+                        'title' => mb_substr($video->title, 0, 100),
+                    ],
+                    $this->buildScheduleParams($publication),
+                ),
+            );
 
             if ($response->failed()) {
                 Log::warning('facebook: upload failed', [
@@ -75,11 +99,51 @@ class FacebookPublisher implements SocialPublisherInterface
 
             return PublishResult::ok(
                 $postId,
-                $postId !== '' ? "https://www.facebook.com/{$postId}" : null,
+                $postId !== '' ? 'https://www.facebook.com/watch/?v='.$postId : null,
                 $data,
             );
         } catch (\Throwable $e) {
             return PublishResult::fail($e->getMessage());
         }
+    }
+
+    /**
+     * @return array{page_id: string, page_access_token: string, page_name?: string}|null
+     */
+    private function pageCredentials(): ?array
+    {
+        $fromDb = SocialPlatformAccount::facebookPageCredentials($this->platformKey);
+
+        if ($fromDb !== null) {
+            return $fromDb;
+        }
+
+        $cfg = config("social.facebook.{$this->configKey}");
+
+        if (! is_array($cfg) || empty($cfg['page_id']) || empty($cfg['page_access_token'])) {
+            return null;
+        }
+
+        return [
+            'page_id' => (string) $cfg['page_id'],
+            'page_access_token' => (string) $cfg['page_access_token'],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildScheduleParams(SocialPublication $publication): array
+    {
+        $scheduledAt = $publication->scheduled_at;
+
+        if ($scheduledAt === null || ! $scheduledAt->isFuture()) {
+            return [];
+        }
+
+        return [
+            'published' => 'false',
+            'scheduled_publish_time' => $scheduledAt->timestamp,
+        ];
     }
 }

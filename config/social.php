@@ -59,6 +59,14 @@ return [
         'youtube' => [
             'refresh_token' => env('YOUTUBE_REFRESH_TOKEN'),
         ],
+        'facebook_esquinaweb' => [
+            'page_id' => env('FACEBOOK_ESQUINAWEB_PAGE_ID'),
+            'page_access_token' => env('FACEBOOK_ESQUINAWEB_PAGE_TOKEN'),
+        ],
+        'facebook_esquinagamers' => [
+            'page_id' => env('FACEBOOK_ESQUINAGAMERS_PAGE_ID'),
+            'page_access_token' => env('FACEBOOK_ESQUINAGAMERS_PAGE_TOKEN'),
+        ],
     ],
 
     'facebook' => [
@@ -67,12 +75,20 @@ return [
             'app_secret' => env('FACEBOOK_ESQUINAWEB_APP_SECRET'),
             'page_id' => env('FACEBOOK_ESQUINAWEB_PAGE_ID'),
             'page_access_token' => env('FACEBOOK_ESQUINAWEB_PAGE_TOKEN'),
+            'redirect_uri' => env(
+                'FACEBOOK_ESQUINAWEB_REDIRECT_URI',
+                env('APP_URL', 'http://localhost:8000').'/auth/facebook/esquinaweb/callback'
+            ),
         ],
         'esquinagamers' => [
             'app_id' => env('FACEBOOK_ESQUINAGAMERS_APP_ID'),
             'app_secret' => env('FACEBOOK_ESQUINAGAMERS_APP_SECRET'),
             'page_id' => env('FACEBOOK_ESQUINAGAMERS_PAGE_ID'),
             'page_access_token' => env('FACEBOOK_ESQUINAGAMERS_PAGE_TOKEN'),
+            'redirect_uri' => env(
+                'FACEBOOK_ESQUINAGAMERS_REDIRECT_URI',
+                env('APP_URL', 'http://localhost:8000').'/auth/facebook/esquinagamers/callback'
+            ),
         ],
     ],
 

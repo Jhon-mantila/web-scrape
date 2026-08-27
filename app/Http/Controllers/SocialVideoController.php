@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\SocialPublication;
 use App\Models\SocialVideo;
+use App\SocialPublishing\Actions\DeleteSocialVideosAction;
 use App\SocialPublishing\Actions\GenerateSocialCaptionsAction;
 use App\SocialPublishing\Actions\GenerateSocialTitleAction;
 use App\SocialPublishing\Actions\PublishAllSocialPublicationsAction;
@@ -19,9 +20,10 @@ use Inertia\Response;
 
 class SocialVideoController extends Controller
 {
-    public function index(): Response
+    public function index(Request $request): Response
     {
         $videos = SocialVideo::query()
+            ->where('user_id', $request->user()->id)
             ->with('publications')
             ->latest()
             ->get()
@@ -79,8 +81,10 @@ class SocialVideoController extends Controller
         return redirect()->route('videos.index')->with('success', 'Video subido correctamente.');
     }
 
-    public function show(SocialVideo $video): Response
+    public function show(Request $request, SocialVideo $video): Response
     {
+        $this->authorizeVideo($request, $video);
+
         $video->load('publications');
 
         return Inertia::render('Videos/Show', [
@@ -91,20 +95,32 @@ class SocialVideoController extends Controller
 
     public function update(Request $request, SocialVideo $video): RedirectResponse
     {
+        $this->authorizeVideo($request, $video);
+
         $validated = $request->validate([
             'title' => 'sometimes|string|max:255',
             'notes' => 'nullable|string|max:2000',
+            'thumbnail' => 'sometimes|file|mimes:'.implode(',', config('social.upload.thumbnail_mimes')).'|max:10240',
             'publications' => 'sometimes|array',
             'publications.*.id' => 'required|integer|exists:social_publications,id',
             'publications.*.caption_edited' => 'nullable|string|max:10000',
             'publications.*.scheduled_at' => 'nullable|date',
         ]);
 
+        $updates = [];
+
         if (isset($validated['title'])) {
-            $video->update([
-                'title' => $validated['title'],
-                'notes' => $validated['notes'] ?? $video->notes,
-            ]);
+            $updates['title'] = $validated['title'];
+            $updates['notes'] = $validated['notes'] ?? $video->notes;
+        }
+
+        if ($request->hasFile('thumbnail')) {
+            Storage::disk('public')->delete($video->thumbnail_path);
+            $updates['thumbnail_path'] = $request->file('thumbnail')->store('social-thumbnails', 'public');
+        }
+
+        if ($updates !== []) {
+            $video->update($updates);
         }
 
         if (isset($validated['publications'])) {
@@ -123,10 +139,12 @@ class SocialVideoController extends Controller
     }
 
     public function generateCaptions(
+        Request $request,
         SocialVideo $video,
         GenerateSocialCaptionsAction $action,
-        Request $request,
     ): RedirectResponse {
+        $this->authorizeVideo($request, $video);
+
         $platforms = $request->input('platforms');
 
         $action->execute($video, is_array($platforms) ? $platforms : null);
@@ -135,9 +153,12 @@ class SocialVideoController extends Controller
     }
 
     public function generateTitle(
+        Request $request,
         SocialVideo $video,
         GenerateSocialTitleAction $action,
     ): RedirectResponse {
+        $this->authorizeVideo($request, $video);
+
         $action->execute($video);
 
         return back()->with('success', 'Título generado con IA.');
@@ -173,11 +194,12 @@ class SocialVideoController extends Controller
         $action->execute($publication->fresh());
 
         $publication->refresh();
-        $message = $publication->status === PublicationStatus::Scheduled
-            ? 'Video programado en YouTube.'
-            : ($publication->status === PublicationStatus::Published
-                ? 'Video publicado en YouTube.'
-                : 'Publicación procesada.');
+        $message = match ($publication->status) {
+            PublicationStatus::Scheduled => 'Video programado.',
+            PublicationStatus::Published => 'Video publicado.',
+            PublicationStatus::Failed => $publication->last_error ?? 'Error al publicar.',
+            default => 'Publicación procesada.',
+        };
 
         return back()->with(
             $publication->status === PublicationStatus::Failed ? 'error' : 'success',
@@ -185,12 +207,44 @@ class SocialVideoController extends Controller
         );
     }
 
-    public function destroy(SocialVideo $video): RedirectResponse
+    public function destroy(Request $request, SocialVideo $video, DeleteSocialVideosAction $action): RedirectResponse
     {
-        Storage::disk('public')->delete([$video->video_path, $video->thumbnail_path]);
-        $video->delete();
+        $this->authorizeVideo($request, $video);
+
+        $action->execute(collect([$video]));
 
         return redirect()->route('videos.index')->with('success', 'Video eliminado.');
+    }
+
+    public function bulkDestroy(Request $request, DeleteSocialVideosAction $action): RedirectResponse
+    {
+        $validated = $request->validate([
+            'ids' => 'sometimes|array',
+            'ids.*' => 'integer|exists:social_videos,id',
+            'all' => 'sometimes|boolean',
+        ]);
+
+        $query = SocialVideo::query()->where('user_id', $request->user()->id);
+
+        if ($request->boolean('all')) {
+            $videos = $query->get();
+        } else {
+            $ids = $validated['ids'] ?? [];
+
+            if ($ids === []) {
+                return back()->with('error', 'No seleccionaste ningún video.');
+            }
+
+            $videos = $query->whereIn('id', $ids)->get();
+        }
+
+        if ($videos->isEmpty()) {
+            return back()->with('error', 'No hay videos para eliminar.');
+        }
+
+        $count = $action->execute($videos);
+
+        return redirect()->route('videos.index')->with('success', "{$count} video(s) eliminado(s) del historial.");
     }
 
     /**
@@ -257,6 +311,8 @@ class SocialVideoController extends Controller
 
     private function syncFromRequest(SocialVideo $video, Request $request): void
     {
+        $this->authorizeVideo($request, $video);
+
         if ($request->filled('title')) {
             $video->update([
                 'title' => $request->string('title')->toString(),
@@ -282,5 +338,10 @@ class SocialVideoController extends Controller
                     'scheduled_at' => $this->normalizeScheduledAt($row['scheduled_at'] ?? null),
                 ]);
         }
+    }
+
+    private function authorizeVideo(Request $request, SocialVideo $video): void
+    {
+        abort_unless($video->user_id === $request->user()->id, 403);
     }
 }

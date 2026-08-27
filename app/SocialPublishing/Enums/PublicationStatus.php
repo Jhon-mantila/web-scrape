@@ -18,7 +18,7 @@ enum PublicationStatus: string
             self::Draft => 'Borrador',
             self::CaptionReady => 'Texto listo',
             self::Publishing => 'Publicando…',
-            self::Scheduled => 'Programado en YouTube',
+            self::Scheduled => 'Programado',
             self::Published => 'Publicado',
             self::Failed => 'Error',
             self::Unavailable => 'Próximamente',

@@ -3,6 +3,7 @@
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\FacebookOAuthController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SocialVideoController;
 use App\Http\Controllers\YouTubeOAuthController;
@@ -28,9 +29,14 @@ Route::middleware('auth')->group(function () {
     Route::get('/auth/youtube/callback', [YouTubeOAuthController::class, 'callback'])->name('youtube.oauth.callback');
     Route::post('/auth/youtube/disconnect', [YouTubeOAuthController::class, 'disconnect'])->name('youtube.oauth.disconnect');
 
+    Route::get('/auth/facebook/{account}/redirect', [FacebookOAuthController::class, 'redirect'])->name('facebook.oauth.redirect');
+    Route::get('/auth/facebook/{account}/callback', [FacebookOAuthController::class, 'callback'])->name('facebook.oauth.callback');
+    Route::post('/auth/facebook/{account}/disconnect', [FacebookOAuthController::class, 'disconnect'])->name('facebook.oauth.disconnect');
+
     Route::get('/videos', [SocialVideoController::class, 'index'])->name('videos.index');
     Route::get('/videos/create', [SocialVideoController::class, 'create'])->name('videos.create');
     Route::post('/videos', [SocialVideoController::class, 'store'])->name('videos.store');
+    Route::post('/videos/bulk-destroy', [SocialVideoController::class, 'bulkDestroy'])->name('videos.bulk-destroy');
     Route::get('/videos/{video}', [SocialVideoController::class, 'show'])->name('videos.show');
     Route::put('/videos/{video}', [SocialVideoController::class, 'update'])->name('videos.update');
     Route::delete('/videos/{video}', [SocialVideoController::class, 'destroy'])->name('videos.destroy');
