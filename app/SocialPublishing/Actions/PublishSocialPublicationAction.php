@@ -40,7 +40,8 @@ class PublishSocialPublicationAction
             $result = $publisher->publish($publication);
 
             if ($result->success) {
-                $isScheduled = $publication->scheduled_at?->isFuture() ?? false;
+                $supportsScheduling = ! str_starts_with($publication->platform, 'linkedin');
+                $isScheduled = $supportsScheduling && ($publication->scheduled_at?->isFuture() ?? false);
 
                 $publication->update([
                     'status' => $isScheduled ? PublicationStatus::Scheduled : PublicationStatus::Published,

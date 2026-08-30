@@ -171,9 +171,29 @@ class SocialVideoController extends Controller
     ): RedirectResponse {
         $this->syncFromRequest($video, $request);
 
-        $summary = $action->execute($video->fresh(['publications']));
+        $validated = $request->validate([
+            'publication_ids' => 'sometimes|array',
+            'publication_ids.*' => 'integer',
+        ]);
 
-        $message = "Envío masivo: {$summary['published']} OK, {$summary['failed']} fallidas, {$summary['skipped']} omitidas.";
+        $publicationIds = null;
+
+        if ($request->has('publication_ids')) {
+            $validIds = $video->publications()->pluck('id')->all();
+            $publicationIds = array_values(array_intersect(
+                $validated['publication_ids'] ?? [],
+                $validIds,
+            ));
+
+            if ($publicationIds === []) {
+                return back()->with('error', 'No seleccionaste ninguna plataforma para enviar.');
+            }
+        }
+
+        $summary = $action->execute($video->fresh(['publications']), $publicationIds);
+
+        $selected = $publicationIds !== null ? count($publicationIds) : $video->publications->count();
+        $message = "Envío ({$selected} seleccionada(s)): {$summary['published']} OK, {$summary['failed']} fallidas, {$summary['skipped']} omitidas.";
 
         return back()->with(
             $summary['failed'] > 0 ? 'error' : 'success',
@@ -275,7 +295,9 @@ class SocialVideoController extends Controller
                 'last_error' => $detailed ? $p->last_error : null,
                 'api_response' => $detailed ? $p->api_response : null,
                 'coming_soon' => (bool) config("social.platforms.{$p->platform}.coming_soon"),
+                'platform_hints' => config("social.platforms.{$p->platform}.hints"),
             ])->values(),
+            'max_video_mb' => (int) config('social.upload.max_video_mb', 500),
         ];
     }
 

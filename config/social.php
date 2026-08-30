@@ -30,6 +30,36 @@ return [
                 'max_chars' => 500,
             ],
         ],
+        'linkedin' => [
+            'label' => 'LinkedIn — Jhon',
+            'icon' => 'linkedin',
+            'enabled' => true,
+            'caption' => [
+                'model' => env('SOCIAL_LINKEDIN_MODEL', env('OLLAMA_MODEL', 'gemma4:12b')),
+                'max_chars' => 3000,
+            ],
+            'hints' => [
+                'scheduling' => false,
+                'thumbnail' => false,
+                'max_video_gb' => 5,
+                'max_duration_minutes' => 10,
+            ],
+        ],
+        'linkedin_jessika' => [
+            'label' => 'LinkedIn — Jessika',
+            'icon' => 'linkedin',
+            'enabled' => true,
+            'caption' => [
+                'model' => env('SOCIAL_LINKEDIN_JESSIKA_MODEL', env('OLLAMA_MODEL', 'gemma4:12b')),
+                'max_chars' => 3000,
+            ],
+            'hints' => [
+                'scheduling' => false,
+                'thumbnail' => false,
+                'max_video_gb' => 5,
+                'max_duration_minutes' => 10,
+            ],
+        ],
         'tiktok' => [
             'label' => 'TikTok',
             'icon' => 'tiktok',
@@ -67,6 +97,26 @@ return [
             'page_id' => env('FACEBOOK_ESQUINAGAMERS_PAGE_ID'),
             'page_access_token' => env('FACEBOOK_ESQUINAGAMERS_PAGE_TOKEN'),
         ],
+        'linkedin' => [
+            'access_token' => env('LINKEDIN_ACCESS_TOKEN'),
+            'refresh_token' => env('LINKEDIN_REFRESH_TOKEN'),
+            'person_urn' => env('LINKEDIN_PERSON_URN'),
+        ],
+        'linkedin_jessika' => [
+            'access_token' => env('LINKEDIN_JESSIKA_ACCESS_TOKEN'),
+            'refresh_token' => env('LINKEDIN_JESSIKA_REFRESH_TOKEN'),
+            'person_urn' => env('LINKEDIN_JESSIKA_PERSON_URN'),
+        ],
+    ],
+
+    'linkedin' => [
+        'client_id' => env('LINKEDIN_CLIENT_ID'),
+        'client_secret' => env('LINKEDIN_CLIENT_SECRET'),
+        'redirect_uri' => env(
+            'LINKEDIN_REDIRECT_URI',
+            env('APP_URL', 'http://localhost:8000').'/auth/linkedin/callback'
+        ),
+        'api_version' => env('LINKEDIN_API_VERSION', '202608'),
     ],
 
     'facebook' => [

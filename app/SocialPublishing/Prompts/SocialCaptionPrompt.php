@@ -11,6 +11,7 @@ class SocialCaptionPrompt
         return match ($platform) {
             Platform::Youtube => 'Eres editor de YouTube para EsquinaAnime. Escribes títulos y descripciones atractivas en español para fans de anime.',
             Platform::FacebookEsquinaweb, Platform::FacebookEsquinagamers => 'Eres community manager de Facebook para una página de anime en español. Escribes posts cortos, directos y con gancho.',
+            Platform::Linkedin, Platform::LinkedinJessika => 'Eres creador de contenido profesional en LinkedIn sobre anime y entretenimiento. Escribes posts informativos, con tono profesional pero cercano, en español.',
             Platform::Tiktok => 'Eres creador de TikTok de anime. Escribes captions cortos con hashtags relevantes en español.',
         };
     }
@@ -42,6 +43,12 @@ class SocialCaptionPrompt
             Genera caption para TikTok en JSON:
             {
               "caption": "texto max {$maxChars} chars con hashtags de anime al final"
+            }
+            TXT,
+            Platform::Linkedin, Platform::LinkedinJessika => <<<TXT
+            Genera post para LinkedIn en JSON:
+            {
+              "caption": "texto max {$maxChars} chars, tono profesional, 1-2 emojis max, párrafos cortos, CTA sutil al final"
             }
             TXT,
             default => <<<TXT

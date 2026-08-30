@@ -4,6 +4,7 @@ use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FacebookOAuthController;
+use App\Http\Controllers\LinkedInOAuthController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SocialVideoController;
 use App\Http\Controllers\YouTubeOAuthController;
@@ -32,6 +33,12 @@ Route::middleware('auth')->group(function () {
     Route::get('/auth/facebook/{account}/redirect', [FacebookOAuthController::class, 'redirect'])->name('facebook.oauth.redirect');
     Route::get('/auth/facebook/{account}/callback', [FacebookOAuthController::class, 'callback'])->name('facebook.oauth.callback');
     Route::post('/auth/facebook/{account}/disconnect', [FacebookOAuthController::class, 'disconnect'])->name('facebook.oauth.disconnect');
+
+    Route::get('/auth/linkedin/redirect', [LinkedInOAuthController::class, 'redirect'])->name('linkedin.oauth.redirect');
+    Route::get('/auth/linkedin/{account}/redirect', [LinkedInOAuthController::class, 'redirect'])->where('account', 'jessika')->name('linkedin.oauth.redirect.account');
+    Route::get('/auth/linkedin/callback', [LinkedInOAuthController::class, 'callback'])->name('linkedin.oauth.callback');
+    Route::post('/auth/linkedin/disconnect', [LinkedInOAuthController::class, 'disconnect'])->name('linkedin.oauth.disconnect');
+    Route::post('/auth/linkedin/{account}/disconnect', [LinkedInOAuthController::class, 'disconnect'])->where('account', 'jessika')->name('linkedin.oauth.disconnect.account');
 
     Route::get('/videos', [SocialVideoController::class, 'index'])->name('videos.index');
     Route::get('/videos/create', [SocialVideoController::class, 'create'])->name('videos.create');

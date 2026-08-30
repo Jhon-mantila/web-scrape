@@ -1,6 +1,8 @@
 <script setup>
+import { computed } from 'vue';
 import { useForm } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import FilePicker from '@/Components/FilePicker.vue';
 
 const props = defineProps({
     platformOptions: {
@@ -8,6 +10,17 @@ const props = defineProps({
         default: () => [],
     },
 });
+
+const platformByKey = computed(() =>
+    Object.fromEntries(props.platformOptions.map((p) => [p.key, p])),
+);
+
+const platformGroups = [
+    { keys: ['youtube'] },
+    { keys: ['facebook_esquinaweb', 'facebook_esquinagamers'], columns: 2 },
+    { keys: ['linkedin', 'linkedin_jessika'], columns: 2 },
+    { keys: ['tiktok'] },
+];
 
 const form = useForm({
     title: '',
@@ -61,23 +74,25 @@ function togglePlatform(key) {
             </div>
 
             <div>
-                <label class="mb-2 block text-sm text-slate-300">Video (.mp4)</label>
-                <input
-                    type="file"
+                <FilePicker
+                    v-model="form.video"
+                    label="Video (.mp4)"
                     accept="video/mp4,video/webm,video/quicktime"
-                    class="block w-full text-sm text-slate-400"
-                    @change="form.video = $event.target.files[0]"
+                    choose-label="Elegir video"
+                    empty-label="Ningún video seleccionado"
+                    hint="Formatos: MP4, WebM o MOV."
                 />
                 <p v-if="form.errors.video" class="mt-1 text-sm text-red-400">{{ form.errors.video }}</p>
             </div>
 
             <div>
-                <label class="mb-2 block text-sm text-slate-300">Thumbnail</label>
-                <input
-                    type="file"
+                <FilePicker
+                    v-model="form.thumbnail"
+                    label="Miniatura"
                     accept="image/jpeg,image/png,image/webp"
-                    class="block w-full text-sm text-slate-400"
-                    @change="form.thumbnail = $event.target.files[0]"
+                    choose-label="Elegir imagen"
+                    empty-label="Ninguna imagen seleccionada"
+                    hint="JPG, PNG o WebP. Se usa en YouTube y Facebook."
                 />
                 <p v-if="form.errors.thumbnail" class="mt-1 text-sm text-red-400">{{ form.errors.thumbnail }}</p>
             </div>
@@ -85,21 +100,29 @@ function togglePlatform(key) {
             <div>
                 <p class="mb-3 text-sm text-slate-300">Plataformas</p>
                 <div class="space-y-2">
-                    <label
-                        v-for="platform in platformOptions"
-                        :key="platform.key"
-                        class="flex items-center gap-3 rounded-xl border border-slate-800 px-4 py-3"
-                        :class="platform.coming_soon ? 'opacity-50' : 'cursor-pointer hover:bg-slate-900'"
+                    <div
+                        v-for="group in platformGroups"
+                        :key="group.keys.join('-')"
+                        :class="group.columns === 2 ? 'grid gap-2 sm:grid-cols-2' : ''"
                     >
-                        <input
-                            type="checkbox"
-                            :disabled="platform.coming_soon || !platform.enabled"
-                            :checked="form.platforms.includes(platform.key)"
-                            @change="togglePlatform(platform.key)"
-                        />
-                        <span>{{ platform.label }}</span>
-                        <span v-if="platform.coming_soon" class="text-xs text-slate-500">Próximamente</span>
-                    </label>
+                        <label
+                            v-for="key in group.keys"
+                            :key="key"
+                            class="flex items-center gap-3 rounded-xl border border-slate-800 px-4 py-3"
+                            :class="platformByKey[key]?.coming_soon ? 'opacity-50' : 'cursor-pointer hover:bg-slate-900'"
+                        >
+                            <template v-if="platformByKey[key]">
+                                <input
+                                    type="checkbox"
+                                    :disabled="platformByKey[key].coming_soon || !platformByKey[key].enabled"
+                                    :checked="form.platforms.includes(key)"
+                                    @change="togglePlatform(key)"
+                                />
+                                <span class="text-sm">{{ platformByKey[key].label }}</span>
+                                <span v-if="platformByKey[key].coming_soon" class="text-xs text-slate-500">Próximamente</span>
+                            </template>
+                        </label>
+                    </div>
                 </div>
                 <p v-if="form.errors.platforms" class="mt-1 text-sm text-red-400">{{ form.errors.platforms }}</p>
             </div>

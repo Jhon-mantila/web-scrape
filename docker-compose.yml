@@ -4,6 +4,9 @@ services:
   laravel_app:
     build: .
     container_name: laravel_app
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     user: "${UID}:${GID}"
     ports:
       - "8000:80"

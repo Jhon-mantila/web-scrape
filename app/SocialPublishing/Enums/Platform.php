@@ -7,6 +7,8 @@ enum Platform: string
     case Youtube = 'youtube';
     case FacebookEsquinaweb = 'facebook_esquinaweb';
     case FacebookEsquinagamers = 'facebook_esquinagamers';
+    case Linkedin = 'linkedin';
+    case LinkedinJessika = 'linkedin_jessika';
     case Tiktok = 'tiktok';
 
     public function label(): string

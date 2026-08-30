@@ -71,4 +71,46 @@ class SocialPlatformAccount extends Model
 
         return null;
     }
+
+    /**
+     * @return array{
+     *     access_token: string,
+     *     refresh_token?: ?string,
+     *     person_urn?: ?string,
+     *     profile_name?: ?string,
+     *     token_expires_at?: ?string
+     * }|null
+     */
+    public static function linkedinCredentials(string $platform = 'linkedin'): ?array
+    {
+        $account = static::query()
+            ->where('platform', $platform)
+            ->where('is_connected', true)
+            ->first();
+
+        $credentials = $account?->credentials;
+
+        if (is_array($credentials) && ! empty($credentials['access_token'])) {
+            return [
+                'access_token' => (string) $credentials['access_token'],
+                'refresh_token' => isset($credentials['refresh_token']) ? (string) $credentials['refresh_token'] : null,
+                'person_urn' => isset($credentials['person_urn']) ? (string) $credentials['person_urn'] : null,
+                'profile_name' => isset($credentials['profile_name']) ? (string) $credentials['profile_name'] : null,
+                'token_expires_at' => isset($credentials['token_expires_at']) ? (string) $credentials['token_expires_at'] : null,
+            ];
+        }
+
+        $envToken = config("social.platform_accounts.{$platform}.access_token");
+        $personUrn = config("social.platform_accounts.{$platform}.person_urn");
+
+        if (is_string($envToken) && $envToken !== '' && is_string($personUrn) && $personUrn !== '') {
+            return [
+                'access_token' => $envToken,
+                'refresh_token' => config("social.platform_accounts.{$platform}.refresh_token"),
+                'person_urn' => $personUrn,
+            ];
+        }
+
+        return null;
+    }
 }
