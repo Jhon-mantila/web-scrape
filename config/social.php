@@ -20,6 +20,10 @@ return [
                 'model' => env('SOCIAL_FACEBOOK_ESQUINAWEB_MODEL', env('OLLAMA_MODEL', 'gemma4:12b')),
                 'max_chars' => 500,
             ],
+            'hints' => [
+                'max_video_gb' => 2,
+                'content_type' => 'Video de página (no Reel)',
+            ],
         ],
         'facebook_esquinagamers' => [
             'label' => 'Facebook — Esquinagamers',
@@ -28,6 +32,10 @@ return [
             'caption' => [
                 'model' => env('SOCIAL_FACEBOOK_ESQUINAGAMERS_MODEL', env('OLLAMA_MODEL', 'gemma4:12b')),
                 'max_chars' => 500,
+            ],
+            'hints' => [
+                'max_video_gb' => 2,
+                'content_type' => 'Video de página (no Reel)',
             ],
         ],
         'linkedin' => [
@@ -83,6 +91,8 @@ return [
         'client_secret' => env('YOUTUBE_CLIENT_SECRET'),
         'redirect_uri' => env('YOUTUBE_REDIRECT_URI', env('APP_URL', 'http://localhost:8000').'/auth/youtube/callback'),
         'channel_id' => env('YOUTUBE_CHANNEL_ID', 'UCosCkg76aWQ6r3-n9AvQePw'),
+        /** Plazo para reconectar si la app OAuth de Google está en modo Testing (7 d). En Production pon 0. */
+        'refresh_token_renewal_days' => (int) env('YOUTUBE_REFRESH_TOKEN_RENEWAL_DAYS', 7),
     ],
 
     'platform_accounts' => [
@@ -120,6 +130,9 @@ return [
     ],
 
     'facebook' => [
+        'max_video_gb' => 2,
+        'normalize_video' => filter_var(env('FACEBOOK_NORMALIZE_VIDEO', true), FILTER_VALIDATE_BOOL),
+
         'esquinaweb' => [
             'app_id' => env('FACEBOOK_ESQUINAWEB_APP_ID'),
             'app_secret' => env('FACEBOOK_ESQUINAWEB_APP_SECRET'),

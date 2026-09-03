@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\SocialPlatformAccount;
 use App\Models\SocialPublication;
 use App\Models\SocialVideo;
 use App\SocialPublishing\Actions\DeleteSocialVideosAction;
@@ -11,6 +12,10 @@ use App\SocialPublishing\Actions\PublishAllSocialPublicationsAction;
 use App\SocialPublishing\Actions\PublishSocialPublicationAction;
 use App\SocialPublishing\Enums\Platform;
 use App\SocialPublishing\Enums\PublicationStatus;
+use App\SocialPublishing\Platforms\Facebook\FacebookVideoDeleter;
+use App\SocialPublishing\Platforms\Facebook\FacebookVideoMetadata;
+use App\SocialPublishing\Platforms\Facebook\FacebookVideoPermalink;
+use App\SocialPublishing\Support\VideoFileSize;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -51,12 +56,14 @@ class SocialVideoController extends Controller
             'platforms' => 'required|array|min:1',
             'platforms.*' => 'string|in:'.implode(',', Platform::values()),
             'video' => 'required|file|mimes:'.implode(',', config('social.upload.video_mimes')).'|max:'.($maxMb * 1024),
-            'thumbnail' => 'required|file|mimes:'.implode(',', config('social.upload.thumbnail_mimes')).'|max:10240',
+            'thumbnail' => 'nullable|file|mimes:'.implode(',', config('social.upload.thumbnail_mimes')).'|max:10240',
         ]);
 
         DB::transaction(function () use ($request, $validated): void {
             $videoPath = $request->file('video')->store('social-videos', 'public');
-            $thumbPath = $request->file('thumbnail')->store('social-thumbnails', 'public');
+            $thumbPath = $request->hasFile('thumbnail')
+                ? $request->file('thumbnail')->store('social-thumbnails', 'public')
+                : null;
 
             $video = SocialVideo::create([
                 'user_id' => $request->user()->id,
@@ -100,7 +107,7 @@ class SocialVideoController extends Controller
         $validated = $request->validate([
             'title' => 'sometimes|string|max:255',
             'notes' => 'nullable|string|max:2000',
-            'thumbnail' => 'sometimes|file|mimes:'.implode(',', config('social.upload.thumbnail_mimes')).'|max:10240',
+            'thumbnail' => 'nullable|file|mimes:'.implode(',', config('social.upload.thumbnail_mimes')).'|max:10240',
             'publications' => 'sometimes|array',
             'publications.*.id' => 'required|integer|exists:social_publications,id',
             'publications.*.caption_edited' => 'nullable|string|max:10000',
@@ -115,7 +122,9 @@ class SocialVideoController extends Controller
         }
 
         if ($request->hasFile('thumbnail')) {
-            Storage::disk('public')->delete($video->thumbnail_path);
+            if ($video->thumbnail_path) {
+                Storage::disk('public')->delete($video->thumbnail_path);
+            }
             $updates['thumbnail_path'] = $request->file('thumbnail')->store('social-thumbnails', 'public');
         }
 
@@ -227,6 +236,55 @@ class SocialVideoController extends Controller
         );
     }
 
+    public function destroyOnFacebook(
+        Request $request,
+        SocialVideo $video,
+        SocialPublication $publication,
+        FacebookVideoDeleter $deleter,
+    ): RedirectResponse {
+        abort_unless($publication->social_video_id === $video->id, 404);
+        abort_unless(str_starts_with($publication->platform, 'facebook_'), 404);
+
+        $this->authorizeVideo($request, $video);
+
+        $credentials = SocialPlatformAccount::facebookPageCredentials($publication->platform);
+
+        if ($credentials === null) {
+            return back()->with('error', 'Facebook no está conectado para esta plataforma.');
+        }
+
+        if ($publication->external_id === null || $publication->external_id === '') {
+            $fromResponse = is_array($publication->api_response)
+                ? ($publication->api_response['facebook_video_id'] ?? $publication->api_response['id'] ?? null)
+                : null;
+
+            if (is_string($fromResponse) && $fromResponse !== '') {
+                $publication->external_id = $fromResponse;
+            }
+        }
+
+        if ($publication->external_id === null || $publication->external_id === '') {
+            return back()->with('error', 'No hay video registrado en Facebook para eliminar.');
+        }
+
+        try {
+            $deleter->delete($publication->external_id, $credentials['page_access_token']);
+        } catch (\Throwable $e) {
+            return back()->with('error', $e->getMessage());
+        }
+
+        $publication->update([
+            'status' => PublicationStatus::Draft,
+            'external_id' => null,
+            'external_url' => null,
+            'api_response' => null,
+            'last_error' => null,
+            'published_at' => null,
+        ]);
+
+        return back()->with('success', 'Enlace con Facebook limpiado. Ya puedes volver a enviar (programado o inmediato).');
+    }
+
     public function destroy(Request $request, SocialVideo $video, DeleteSocialVideosAction $action): RedirectResponse
     {
         $this->authorizeVideo($request, $video);
@@ -272,12 +330,29 @@ class SocialVideoController extends Controller
      */
     private function videoPayload(SocialVideo $video, bool $detailed = false): array
     {
+        $videoSizeBytes = VideoFileSize::bytesFromPath(
+            Storage::disk('public')->path($video->video_path),
+        );
+        $videoMetadata = FacebookVideoMetadata::tryFromPath(
+            Storage::disk('public')->path($video->video_path),
+        );
+
         return [
             'id' => $video->id,
             'title' => $video->title,
             'notes' => $video->notes,
             'video_url' => $this->publicStorageUrl($video->video_path),
-            'thumbnail_url' => $this->publicStorageUrl($video->thumbnail_path),
+            'video_size_bytes' => $videoSizeBytes,
+            'video_size_label' => VideoFileSize::label($videoSizeBytes),
+            'video_size_mb' => VideoFileSize::megabytes($videoSizeBytes),
+            'video_width' => $videoMetadata?->width,
+            'video_height' => $videoMetadata?->height,
+            'facebook_content_type' => 'Video de página',
+            'facebook_max_video_gb' => (int) config('social.facebook.max_video_gb', 2),
+            'thumbnail_url' => $video->thumbnail_path
+                ? $this->publicStorageUrl($video->thumbnail_path)
+                : null,
+            'has_thumbnail' => $video->thumbnail_path !== null && $video->thumbnail_path !== '',
             'created_at' => $video->created_at?->toIso8601String(),
             'publications' => $video->publications->map(fn (SocialPublication $p) => [
                 'id' => $p->id,
@@ -291,7 +366,8 @@ class SocialVideoController extends Controller
                 'caption' => $p->caption(),
                 'scheduled_at' => $p->scheduled_at?->toIso8601String(),
                 'published_at' => $p->published_at?->toIso8601String(),
-                'external_url' => $p->external_url,
+                'external_id' => $p->external_id,
+                'external_url' => $this->facebookPublicationUrl($p),
                 'last_error' => $detailed ? $p->last_error : null,
                 'api_response' => $detailed ? $p->api_response : null,
                 'coming_soon' => (bool) config("social.platforms.{$p->platform}.coming_soon"),
@@ -329,6 +405,43 @@ class SocialVideoController extends Controller
     private function publicStorageUrl(string $path): string
     {
         return '/storage/'.ltrim($path, '/');
+    }
+
+    private function facebookPublicationUrl(SocialPublication $publication): ?string
+    {
+        if ($publication->external_url === null || ! str_starts_with($publication->platform, 'facebook_')) {
+            return $publication->external_url;
+        }
+
+        $videoId = $publication->external_id;
+
+        if ($videoId === null || $videoId === '') {
+            return $publication->external_url;
+        }
+
+        $apiResponse = is_array($publication->api_response) ? $publication->api_response : [];
+        $contentType = is_string($apiResponse['content_type'] ?? null)
+            ? $apiResponse['content_type']
+            : 'page_video';
+
+        if ($contentType === 'reel') {
+            $contentType = 'page_video';
+        }
+
+        $credentials = SocialPlatformAccount::facebookPageCredentials($publication->platform);
+        $pageId = is_array($credentials) ? ($credentials['page_id'] ?? null) : null;
+
+        if ($pageId === null || $pageId === '') {
+            $configKey = str_replace('facebook_', '', $publication->platform);
+            $pageId = config("social.facebook.{$configKey}.page_id");
+        }
+
+        return FacebookVideoPermalink::build(
+            $videoId,
+            $contentType,
+            is_string($pageId) ? $pageId : null,
+            $publication->external_url,
+        );
     }
 
     private function syncFromRequest(SocialVideo $video, Request $request): void

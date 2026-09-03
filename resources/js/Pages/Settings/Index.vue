@@ -67,6 +67,25 @@ function linkedinDisconnectUrl(account) {
                         <p class="mt-2 text-sm" :class="youtube.connected ? 'text-emerald-400' : 'text-amber-400'">
                             {{ youtube.connected ? '✅ Conectado' : '⏳ Sin conectar' }}
                         </p>
+                        <p v-if="youtube.connected && youtube.renewal?.connected_at" class="mt-1 text-xs text-slate-500">
+                            Conectado el {{ formatDate(youtube.renewal.connected_at) }}
+                        </p>
+                        <p
+                            v-if="youtube.connected && youtube.renewal"
+                            class="mt-2 text-sm"
+                            :class="renewalClass(youtube.renewal)"
+                        >
+                            <template v-if="youtube.renewal.source === 'oauth' && youtube.renewal.expires_at">
+                                <span v-if="youtube.renewal.is_expired">Refresh token vencido — vuelve a conectar</span>
+                                <span v-else>
+                                    Reconectar antes del {{ formatDate(youtube.renewal.expires_at) }}
+                                    <span v-if="youtube.renewal.days_remaining !== null">
+                                        ({{ youtube.renewal.days_remaining }} d)
+                                    </span>
+                                </span>
+                            </template>
+                            <template v-else>{{ youtube.renewal.message }}</template>
+                        </p>
                         <p v-if="!youtube.has_client" class="mt-2 text-sm text-red-400">
                             Falta YOUTUBE_CLIENT_ID / YOUTUBE_CLIENT_SECRET en .env
                         </p>
@@ -323,7 +342,9 @@ function linkedinDisconnectUrl(account) {
 
         <div class="mt-6 max-w-5xl space-y-3 text-sm text-slate-500">
             <p>
-                YouTube: Google pedirá permiso para subir videos. El refresh token se guarda encriptado en la base de datos.
+                YouTube: Google guarda un refresh token (no el access token de 1 h). Si tu app OAuth está en
+                <em>Testing</em>, reconecta cada ~7 días; en <em>Production</em> no caduca salvo revocación.
+                El access token se renueva solo al publicar.
             </p>
             <p>
                 LinkedIn: misma app para todos los perfiles. Cada persona inicia sesión con su cuenta al conectar.

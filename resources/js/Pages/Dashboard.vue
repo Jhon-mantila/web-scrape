@@ -98,10 +98,17 @@ function statusBadgeClass(status) {
             >
                 <div class="flex flex-wrap gap-4">
                     <img
+                        v-if="video.thumbnail_url"
                         :src="video.thumbnail_url"
                         :alt="video.title"
                         class="h-20 w-32 rounded-xl object-cover"
                     />
+                    <div
+                        v-else
+                        class="flex h-20 w-32 items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-900/80 text-xs text-slate-500"
+                    >
+                        Sin miniatura
+                    </div>
                     <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-start justify-between gap-3">
                             <div>

@@ -135,10 +135,17 @@ function deleteOne(video) {
                         />
                     </div>
                     <img
+                        v-if="video.thumbnail_url"
                         :src="video.thumbnail_url"
                         :alt="video.title"
                         class="h-28 w-44 rounded-xl object-cover"
                     />
+                    <div
+                        v-else
+                        class="flex h-28 w-44 items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-900/80 text-xs text-slate-500"
+                    >
+                        Sin miniatura
+                    </div>
                     <div class="flex-1">
                         <div class="flex items-start justify-between gap-4">
                             <div>

@@ -17,8 +17,8 @@ class PublishResult
         return new self(true, $externalId, $externalUrl, $raw);
     }
 
-    public static function fail(string $error, ?array $raw = null): self
+    public static function fail(string $error, ?array $raw = null, ?string $externalId = null): self
     {
-        return new self(false, error: $error, rawResponse: $raw);
+        return new self(false, $externalId, null, $raw, $error);
     }
 }

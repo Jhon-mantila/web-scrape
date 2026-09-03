@@ -81,7 +81,10 @@ class DashboardController extends Controller
         return [
             'id' => $video->id,
             'title' => $video->title,
-            'thumbnail_url' => '/storage/'.ltrim($video->thumbnail_path, '/'),
+            'thumbnail_url' => $video->thumbnail_path
+                ? '/storage/'.ltrim($video->thumbnail_path, '/')
+                : null,
+            'has_thumbnail' => $video->thumbnail_path !== null && $video->thumbnail_path !== '',
             'created_at' => $video->created_at?->toIso8601String(),
             'publications' => $publications,
             'has_action_needed' => $hasActionNeeded,

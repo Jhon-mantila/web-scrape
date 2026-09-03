@@ -54,6 +54,7 @@ class PublishSocialPublicationAction
             } else {
                 $publication->update([
                     'status' => PublicationStatus::Failed,
+                    'external_id' => $result->externalId,
                     'api_response' => $result->rawResponse,
                     'last_error' => $result->error,
                 ]);

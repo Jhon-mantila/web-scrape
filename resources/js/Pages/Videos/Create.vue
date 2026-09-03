@@ -49,7 +49,7 @@ function togglePlatform(key) {
     <AppLayout>
         <div class="mb-8">
             <h2 class="text-2xl font-semibold">Subir video</h2>
-            <p class="mt-1 text-slate-400">MP4 + thumbnail JPG/PNG/WebP.</p>
+            <p class="mt-1 text-slate-400">Sube el video MP4. La miniatura es opcional (YouTube y Facebook la usan solo si la cargas).</p>
         </div>
 
         <form @submit.prevent="submit" class="max-w-2xl space-y-6">
@@ -88,11 +88,11 @@ function togglePlatform(key) {
             <div>
                 <FilePicker
                     v-model="form.thumbnail"
-                    label="Miniatura"
+                    label="Miniatura (opcional)"
                     accept="image/jpeg,image/png,image/webp"
                     choose-label="Elegir imagen"
-                    empty-label="Ninguna imagen seleccionada"
-                    hint="JPG, PNG o WebP. Se usa en YouTube y Facebook."
+                    empty-label="Sin miniatura — YouTube/Facebook usarán la suya"
+                    hint="JPG, PNG o WebP. Solo se envía a YouTube y Facebook si cargas una."
                 />
                 <p v-if="form.errors.thumbnail" class="mt-1 text-sm text-red-400">{{ form.errors.thumbnail }}</p>
             </div>

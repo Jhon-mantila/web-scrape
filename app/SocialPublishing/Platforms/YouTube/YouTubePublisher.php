@@ -75,16 +75,18 @@ class YouTubePublisher implements SocialPublisherInterface
                 return PublishResult::fail('YouTube no devolvió ID de video.', $data);
             }
 
-            $thumbnailResult = $this->uploadThumbnail($accessToken, $videoId, $video->thumbnail_path);
+            $thumbnailResult = $this->maybeUploadThumbnail($accessToken, $videoId, $video->thumbnail_path);
 
-            if (! $thumbnailResult['ok']) {
-                Log::warning('youtube: thumbnail upload failed', [
-                    'video_id' => $videoId,
-                    'error' => $thumbnailResult['error'] ?? 'unknown',
-                ]);
-                $data['thumbnail_upload'] = $thumbnailResult;
-            } else {
-                $data['thumbnail_upload'] = ['ok' => true];
+            if ($thumbnailResult !== null) {
+                if (! $thumbnailResult['ok']) {
+                    Log::warning('youtube: thumbnail upload failed', [
+                        'video_id' => $videoId,
+                        'error' => $thumbnailResult['error'] ?? 'unknown',
+                    ]);
+                    $data['thumbnail_upload'] = $thumbnailResult;
+                } else {
+                    $data['thumbnail_upload'] = ['ok' => true];
+                }
             }
 
             return PublishResult::ok(
@@ -137,6 +139,18 @@ class YouTubePublisher implements SocialPublisherInterface
         }
 
         return $status;
+    }
+
+    /**
+     * @return array{ok: bool, error?: string, response?: mixed}|null
+     */
+    private function maybeUploadThumbnail(string $accessToken, string $videoId, ?string $thumbnailPath): ?array
+    {
+        if ($thumbnailPath === null || $thumbnailPath === '') {
+            return null;
+        }
+
+        return $this->uploadThumbnail($accessToken, $videoId, $thumbnailPath);
     }
 
     /**

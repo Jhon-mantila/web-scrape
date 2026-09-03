@@ -55,4 +55,6 @@ Route::middleware('auth')->group(function () {
         ->name('videos.publish-all');
     Route::post('/videos/{video}/publications/{publication}/publish', [SocialVideoController::class, 'publish'])
         ->name('videos.publications.publish');
+    Route::delete('/videos/{video}/publications/{publication}/facebook', [SocialVideoController::class, 'destroyOnFacebook'])
+        ->name('videos.publications.facebook.destroy');
 });

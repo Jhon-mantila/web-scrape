@@ -18,6 +18,7 @@ class SettingsController extends Controller
                 'channel_id' => config('social.youtube.channel_id'),
                 'redirect_uri' => $youtubeOAuth->redirectUri(),
                 'has_client' => (bool) config('social.youtube.client_id'),
+                'renewal' => $youtubeOAuth->renewalInfo(),
             ],
             'linkedin' => collect(['default', 'jessika'])
                 ->map(function (string $account) {
