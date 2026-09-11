@@ -255,6 +255,14 @@ function canDeleteFromFacebook(pub) {
     return isFacebook(pub.platform) && facebookVideoId(pub);
 }
 
+function removePlatform(pub) {
+    if (!confirm(`¿Quitar ${pub.platform_label} de este video?`)) {
+        return;
+    }
+
+    router.delete(route('videos.publications.destroy', [props.video.id, pub.id]));
+}
+
 function publishSelected() {
     const selected = selectedPublishableCount.value;
     const total = publishableCount.value;
@@ -477,6 +485,14 @@ function openSchedulePicker(event) {
                             >
                                 Eliminar de Facebook
                             </button>
+                            <button
+                                v-if="pub.removable"
+                                type="button"
+                                class="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+                                @click="removePlatform(pub)"
+                            >
+                                Quitar plataforma
+                            </button>
                         </div>
                     </div>
 
@@ -526,7 +542,7 @@ function openSchedulePicker(event) {
                                 </button>
                             </div>
                             <p class="mt-1.5 text-xs text-slate-500">
-                                Clic en el campo o en el calendario · mín. 10 min en el futuro (Facebook)
+                                Meta publicará en la página a esa hora.
                             </p>
                         </div>
                         <div v-else class="rounded-lg border border-slate-700/80 bg-slate-950/80 px-3 py-2">
@@ -537,15 +553,18 @@ function openSchedulePicker(event) {
                                 </li>
                             </ul>
                         </div>
-                        <div v-if="pub.external_url" class="flex items-end">
-                            <a :href="pub.external_url" target="_blank" class="text-sm text-violet-400 hover:underline">
+                        <div v-if="pub.status === 'published' && pub.external_url" class="flex items-end">
+                            <a :href="pub.external_url" target="_blank" rel="noopener noreferrer" class="text-sm text-violet-400 hover:underline">
                                 Ver publicación →
                             </a>
                         </div>
                     </div>
 
-                    <p v-if="pub.status === 'scheduled' && pub.scheduled_at" class="mt-2 text-sm text-emerald-400">
-                        Se publicará el {{ new Date(pub.scheduled_at).toLocaleString('es-CO') }}
+                    <p v-if="pub.status === 'scheduled' && pub.scheduled_at" class="mt-2 text-sm text-amber-400">
+                        Programado en Meta para el {{ new Date(pub.scheduled_at).toLocaleString('es-CO') }}
+                        <span v-if="isFacebook(pub.platform)" class="block text-xs text-slate-500">
+                            Meta lo hará público a esa hora. El enlace aparece cuando abras este video después de publicarse.
+                        </span>
                     </p>
                     <p v-if="pub.last_error" class="mt-3 text-sm text-red-400">{{ pub.last_error }}</p>
                     <p

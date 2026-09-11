@@ -7,7 +7,6 @@ use App\Models\SocialPublication;
 use App\SocialPublishing\Contracts\SocialPublisherInterface;
 use App\SocialPublishing\DTO\PublishResult;
 use App\SocialPublishing\Support\VideoFileSize;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
@@ -20,8 +19,6 @@ use RuntimeException;
 class FacebookPublisher implements SocialPublisherInterface
 {
     private const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
-
-    private const CONTENT_TYPE = 'page_video';
 
     public function __construct(
         private readonly string $platformKey,
@@ -82,10 +79,23 @@ class FacebookPublisher implements SocialPublisherInterface
         try {
             $metadata = FacebookVideoMetadata::fromPath($preparedPath);
 
-            Log::info('facebook: publish page video', [
+            Log::info('facebook: publish', [
                 'platform' => $this->platformKey,
                 'dimensions' => $metadata->dimensionsLabel(),
+                'content_type' => $metadata->contentType(),
             ]);
+
+            if ($metadata->contentType() === 'reel') {
+                return $this->publishAsReel(
+                    $publication,
+                    $pageId,
+                    $token,
+                    $preparedPath,
+                    $caption,
+                    $fileSize,
+                    $metadata,
+                );
+            }
 
             return $this->publishAsPageVideo(
                 $publication,
@@ -107,6 +117,49 @@ class FacebookPublisher implements SocialPublisherInterface
         }
     }
 
+    private function publishAsReel(
+        SocialPublication $publication,
+        string $pageId,
+        string $token,
+        string $videoPath,
+        string $caption,
+        ?int $fileSize,
+        FacebookVideoMetadata $metadata,
+    ): PublishResult {
+        $isScheduled = $publication->scheduled_at?->isFuture() ?? false;
+
+        $finishParams = [
+            'title' => mb_substr($publication->video->title, 0, 100),
+            'description' => $caption,
+            'video_state' => $isScheduled ? 'SCHEDULED' : 'PUBLISHED',
+        ];
+
+        if ($isScheduled && $publication->scheduled_at !== null) {
+            $finishParams['scheduled_publish_time'] = $publication->scheduled_at->timestamp;
+        }
+
+        try {
+            $upload = (new FacebookReelUpload)->upload($pageId, $token, $videoPath, $finishParams);
+        } catch (\Throwable $e) {
+            Log::warning('facebook: reel upload failed', [
+                'platform' => $this->platformKey,
+                'error' => $e->getMessage(),
+            ]);
+
+            return PublishResult::fail($e->getMessage(), $this->videoMeta($fileSize, $metadata));
+        }
+
+        return $this->finalizeReelAfterUpload(
+            $upload['video_id'],
+            is_array($upload['response']) ? $upload['response'] : [],
+            $pageId,
+            $token,
+            $fileSize,
+            $metadata,
+            $isScheduled,
+        );
+    }
+
     private function publishAsPageVideo(
         SocialPublication $publication,
         string $pageId,
@@ -121,16 +174,16 @@ class FacebookPublisher implements SocialPublisherInterface
         $uploader = $this->pageVideoUpload ?? new FacebookPageVideoChunkedUpload;
         $isScheduled = $publication->scheduled_at?->isFuture() ?? false;
 
-        $finishParams = array_merge(
-            [
-                'title' => mb_substr($publication->video->title, 0, 100),
-                'description' => $caption,
-                'published' => 'false',
-            ],
-            $isScheduled
-                ? ['scheduled_publish_time' => $publication->scheduled_at->timestamp]
-                : [],
-        );
+        $finishParams = [
+            'title' => mb_substr($publication->video->title, 0, 100),
+            'description' => $caption,
+            'published' => $isScheduled ? 'false' : 'true',
+        ];
+
+        if ($isScheduled && $publication->scheduled_at !== null) {
+            $finishParams['scheduled_publish_time'] = $publication->scheduled_at->timestamp;
+            $finishParams['unpublished_content_type'] = 'SCHEDULED';
+        }
 
         try {
             $thumbFullPath = $this->resolveThumbnailPath($disk, $thumbnailPath);
@@ -156,6 +209,7 @@ class FacebookPublisher implements SocialPublisherInterface
             $metadata,
             $isScheduled,
             'page_video_chunked',
+            $publication->scheduled_at,
         );
     }
 
@@ -182,12 +236,15 @@ class FacebookPublisher implements SocialPublisherInterface
         FacebookVideoMetadata $metadata,
         bool $isScheduled,
         string $uploadMethod,
+        ?\Illuminate\Support\Carbon $scheduledAt,
     ): PublishResult {
         $draft = PublishResult::ok(
             $videoId,
             null,
             array_merge($createResponse, $this->videoMeta($fileSize, $metadata), [
                 'upload_method' => $uploadMethod,
+                'facebook_publish_method' => 'finish',
+                'facebook_scheduled_for' => $scheduledAt?->toIso8601String(),
             ]),
         );
 
@@ -197,43 +254,155 @@ class FacebookPublisher implements SocialPublisherInterface
             $token,
             $metadata,
             $this->resolveThumbnailPath($disk, $thumbnailPath),
+            $isScheduled,
         );
 
-        if (! $finalized->success || $isScheduled) {
+        if (! $finalized->success) {
             return $finalized;
         }
 
-        return $this->publishVideoNow($finalized, $token);
-    }
-
-    private function publishVideoNow(PublishResult $result, string $token): PublishResult
-    {
-        if ($result->externalId === null || $result->externalId === '') {
-            return $result;
-        }
-
-        $response = Http::timeout(60)->post($this->graphUrl("/{$result->externalId}"), [
-            'access_token' => $token,
-            'published' => 'true',
-        ]);
+        $inspector = $this->videoInspector ?? new FacebookVideoInspector;
 
         try {
-            FacebookGraphResponse::assertSuccessful($response, 'publicar video en el muro');
+            if ($isScheduled) {
+                $info = $inspector->waitForScheduledOnMeta($videoId, $token);
+
+                return PublishResult::ok(
+                    $videoId,
+                    $finalized->externalUrl,
+                    array_merge($finalized->rawResponse ?? [], [
+                        'facebook_visibility_verified' => 'video_scheduled',
+                    ], $this->videoInspectionMeta($info)),
+                );
+            }
+
+            $info = $inspector->waitForPublicPublish($videoId, $token);
         } catch (\Throwable $e) {
+            Log::warning('facebook: page video visibility not confirmed after finish', [
+                'platform' => $this->platformKey,
+                'video_id' => $videoId,
+                'error' => $e->getMessage(),
+            ]);
+
             return PublishResult::fail(
-                'Video procesado pero no se pudo publicar en la página: '.$e->getMessage(),
-                array_merge($result->rawResponse ?? [], ['facebook_video_id' => $result->externalId]),
-                $result->externalId,
+                $e->getMessage(),
+                array_merge($finalized->rawResponse ?? [], [
+                    'facebook_video_id' => $videoId,
+                ]),
+                $videoId,
             );
         }
 
+        $apiPermalink = is_string($info['permalink_url'] ?? null) ? $info['permalink_url'] : null;
+        $permalink = FacebookVideoPermalink::build(
+            $videoId,
+            'page_video',
+            $pageId,
+            $apiPermalink ?? $finalized->externalUrl,
+        );
+
         return PublishResult::ok(
-            $result->externalId,
-            $result->externalUrl,
-            array_merge($result->rawResponse ?? [], [
-                'facebook_published_now' => true,
-                'publish_response' => $response->json(),
+            $videoId,
+            $permalink !== '' ? $permalink : $finalized->externalUrl,
+            array_merge($finalized->rawResponse ?? [], [
+                'facebook_visibility_verified' => 'video_public',
+            ], $this->videoInspectionMeta($info)),
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $createResponse
+     */
+    private function finalizeReelAfterUpload(
+        string $videoId,
+        array $createResponse,
+        string $pageId,
+        string $token,
+        ?int $fileSize,
+        FacebookVideoMetadata $metadata,
+        bool $isScheduled,
+    ): PublishResult {
+        $postId = is_string($createResponse['post_id'] ?? null) ? $createResponse['post_id'] : null;
+
+        $draft = PublishResult::ok(
+            $videoId,
+            null,
+            array_merge($createResponse, $this->videoMeta($fileSize, $metadata), [
+                'upload_method' => 'reel',
+                'facebook_post_id' => $postId,
             ]),
+        );
+
+        $finalized = $this->finalizePublishedVideo(
+            $draft,
+            $pageId,
+            $token,
+            $metadata,
+            null,
+            $isScheduled,
+        );
+
+        if (! $finalized->success) {
+            return $finalized;
+        }
+
+        $inspector = $this->videoInspector ?? new FacebookVideoInspector;
+
+        try {
+            if ($isScheduled) {
+                $info = $inspector->waitForScheduledOnMeta($videoId, $token);
+                $permalink = $this->reelPermalink($videoId, $pageId, $postId, $info['permalink_url'] ?? null);
+
+                return PublishResult::ok(
+                    $videoId,
+                    $permalink,
+                    array_merge($finalized->rawResponse ?? [], [
+                        'facebook_publish_method' => 'reel',
+                        'facebook_visibility_verified' => 'reel_scheduled',
+                    ], $this->videoInspectionMeta($info)),
+                );
+            }
+
+            $info = $inspector->waitForPublicPublish($videoId, $token);
+        } catch (\Throwable $e) {
+            Log::warning('facebook: reel publish visibility not confirmed', [
+                'platform' => $this->platformKey,
+                'video_id' => $videoId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return PublishResult::fail(
+                $e->getMessage(),
+                array_merge($finalized->rawResponse ?? [], [
+                    'facebook_video_id' => $videoId,
+                ]),
+                $videoId,
+            );
+        }
+
+        $permalink = $this->reelPermalink($videoId, $pageId, $postId, $info['permalink_url'] ?? null);
+
+        return PublishResult::ok(
+            $videoId,
+            $permalink,
+            array_merge($finalized->rawResponse ?? [], [
+                'facebook_publish_method' => 'reel',
+                'facebook_visibility_verified' => 'reel_public',
+            ], $this->videoInspectionMeta($info)),
+        );
+    }
+
+    private function reelPermalink(string $videoId, string $pageId, ?string $postId, mixed $apiPermalink): string
+    {
+        if ($postId !== null && $postId !== '') {
+            return FacebookPageFeedScheduler::postUrl($postId);
+        }
+
+        return FacebookVideoPermalink::build(
+            $videoId,
+            'reel',
+            $pageId,
+            is_string($apiPermalink) ? $apiPermalink : null,
         );
     }
 
@@ -243,6 +412,7 @@ class FacebookPublisher implements SocialPublisherInterface
         string $token,
         FacebookVideoMetadata $metadata,
         ?string $thumbnailFullPath = null,
+        bool $isScheduled = false,
     ): PublishResult {
         if (! $result->success || $result->externalId === null || $result->externalId === '') {
             return $result;
@@ -250,7 +420,8 @@ class FacebookPublisher implements SocialPublisherInterface
 
         try {
             $inspector = $this->videoInspector ?? new FacebookVideoInspector;
-            $info = $inspector->waitForReady($result->externalId, $token, self::CONTENT_TYPE);
+            $contentType = $metadata->contentType();
+            $info = $inspector->waitForReady($result->externalId, $token, $contentType);
 
             if (($info['video_status'] ?? null) !== 'ready') {
                 return PublishResult::fail(
@@ -264,13 +435,48 @@ class FacebookPublisher implements SocialPublisherInterface
                 );
             }
 
-            $thumbnailUpload = ($this->thumbnailUploader ?? new FacebookVideoThumbnailUploader)
-                ->upload($result->externalId, $token, $thumbnailFullPath);
+            if ($isScheduled) {
+                if ($inspector->isPubliclyPublished($info)) {
+                    Log::info('facebook: processed video already public before schedule step', [
+                        'platform' => $this->platformKey,
+                        'video_id' => $result->externalId,
+                        'publish_status' => $info['publish_status'],
+                    ]);
+                } elseif ($inspector->isScheduledOnMeta($info)) {
+                    Log::info('facebook: processed video already scheduled on Meta', [
+                        'platform' => $this->platformKey,
+                        'video_id' => $result->externalId,
+                        'publish_status' => $info['publish_status'],
+                    ]);
+                }
+            } elseif ($inspector->isScheduledOnMeta($info)) {
+                return PublishResult::fail(
+                    'Meta dejó el video programado pero se pidió publicación inmediata (publish_status=scheduled). '
+                    .'Elimínalo en Facebook e inténtalo de nuevo.',
+                    array_merge($result->rawResponse ?? [], $this->videoInspectionMeta($info), [
+                        'facebook_video_id' => $result->externalId,
+                    ]),
+                    $result->externalId,
+                );
+            } elseif ($inspector->isPubliclyPublished($info)) {
+                Log::info('facebook: processed video already public before publish step', [
+                    'platform' => $this->platformKey,
+                    'video_id' => $result->externalId,
+                    'publish_status' => $info['publish_status'],
+                ]);
+            }
+
+            $thumbnailUpload = null;
+
+            if ($contentType === 'page_video') {
+                $thumbnailUpload = ($this->thumbnailUploader ?? new FacebookVideoThumbnailUploader)
+                    ->upload($result->externalId, $token, $thumbnailFullPath);
+            }
 
             $apiPermalink = is_string($info['permalink_url'] ?? null) ? $info['permalink_url'] : null;
             $permalink = FacebookVideoPermalink::build(
                 $result->externalId,
-                self::CONTENT_TYPE,
+                $contentType,
                 $pageId,
                 $apiPermalink,
             );
@@ -278,10 +484,7 @@ class FacebookPublisher implements SocialPublisherInterface
             return PublishResult::ok(
                 $result->externalId,
                 $permalink,
-                array_merge($result->rawResponse ?? [], [
-                    'facebook_video_status' => $info['video_status'],
-                    'facebook_published' => $info['published'],
-                    'facebook_processing_status' => $info['status'],
+                array_merge($result->rawResponse ?? [], $this->videoInspectionMeta($info), [
                     'facebook_permalink_api' => $apiPermalink,
                 ], $thumbnailUpload !== null ? ['thumbnail_upload' => $thumbnailUpload] : []),
             );
@@ -289,7 +492,7 @@ class FacebookPublisher implements SocialPublisherInterface
             Log::warning('facebook: video inspection failed', [
                 'platform' => $this->platformKey,
                 'video_id' => $result->externalId,
-                'content_type' => self::CONTENT_TYPE,
+                'content_type' => $contentType,
                 'error' => $e->getMessage(),
             ]);
 
@@ -303,9 +506,27 @@ class FacebookPublisher implements SocialPublisherInterface
         }
     }
 
-    private function graphUrl(string $path): string
+    /**
+     * @param  array{
+     *     video_status?: ?string,
+     *     published?: mixed,
+     *     publish_status?: ?string,
+     *     embed_is_reel?: bool,
+     *     status?: mixed,
+     *     permalink_url?: mixed
+     * }  $info
+     * @return array<string, mixed>
+     */
+    private function videoInspectionMeta(array $info): array
     {
-        return 'https://graph.facebook.com/v21.0'.$path;
+        return [
+            'facebook_video_status' => $info['video_status'] ?? null,
+            'facebook_published' => $info['published'] ?? null,
+            'facebook_publish_status' => $info['publish_status'] ?? null,
+            'facebook_embed_is_reel' => $info['embed_is_reel'] ?? false,
+            'facebook_processing_status' => $info['status'] ?? null,
+            'facebook_permalink_api' => $info['permalink_url'] ?? null,
+        ];
     }
 
     /**
@@ -350,8 +571,8 @@ class FacebookPublisher implements SocialPublisherInterface
     private function videoMeta(?int $fileSize, FacebookVideoMetadata $metadata): array
     {
         return array_merge($this->sizeMeta($fileSize), [
-            'content_type' => self::CONTENT_TYPE,
-            'content_type_label' => 'Video de página',
+            'content_type' => $metadata->contentType(),
+            'content_type_label' => $metadata->contentTypeLabel(),
             'video_width' => $metadata->width,
             'video_height' => $metadata->height,
             'video_dimensions' => $metadata->dimensionsLabel(),

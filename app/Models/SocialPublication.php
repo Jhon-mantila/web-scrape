@@ -43,4 +43,25 @@ class SocialPublication extends Model
     {
         return config("social.platforms.{$this->platform}.label", $this->platform);
     }
+
+    public function isRemovable(): bool
+    {
+        if (in_array($this->status, [
+            PublicationStatus::Published,
+            PublicationStatus::Scheduled,
+            PublicationStatus::Publishing,
+        ], true)) {
+            return false;
+        }
+
+        if ($this->status === PublicationStatus::Failed) {
+            return $this->external_id === null || $this->external_id === '';
+        }
+
+        return in_array($this->status, [
+            PublicationStatus::Draft,
+            PublicationStatus::CaptionReady,
+            PublicationStatus::Unavailable,
+        ], true);
+    }
 }

@@ -10,13 +10,59 @@ class FacebookVideoInspector
 {
     private const GRAPH_VERSION = 'v21.0';
 
+    private const VIDEO_FIELDS = 'status,permalink_url,published,title,format';
+
     private const MAX_ATTEMPTS = 36;
 
     private const SLEEP_SECONDS = 10;
 
+    private const PUBLISH_VISIBILITY_MAX_ATTEMPTS = 12;
+
+    private const PUBLISH_VISIBILITY_SLEEP_SECONDS = 5;
+
+    /**
+     * @return array{
+     *     video_status: ?string,
+     *     permalink_url: mixed,
+     *     published: mixed,
+     *     status: mixed,
+     *     format: mixed,
+     *     publish_status: ?string,
+     *     embed_is_reel: bool
+     * }
+     */
+    public function inspect(string $videoId, string $accessToken): array
+    {
+        if ($videoId === '') {
+            throw new RuntimeException('No hay ID de video de Facebook para consultar.');
+        }
+
+        $response = Http::timeout(60)->get($this->graphUrl("/{$videoId}"), [
+            'access_token' => $accessToken,
+            'fields' => self::VIDEO_FIELDS,
+        ]);
+
+        FacebookGraphResponse::assertSuccessful($response, 'consultar video de Facebook');
+
+        return $this->normalizeInspection(
+            $response->json('status'),
+            $response->json('published'),
+            $response->json('permalink_url'),
+            $response->json('format'),
+        );
+    }
+
     /**
      * @param  'reel'|'page_video'|null  $expectedContentType
-     * @return array{video_status: string, permalink_url: ?string, published: mixed, status: mixed, format: mixed}
+     * @return array{
+     *     video_status: string,
+     *     permalink_url: mixed,
+     *     published: mixed,
+     *     status: mixed,
+     *     format: mixed,
+     *     publish_status: ?string,
+     *     embed_is_reel: bool
+     * }
      */
     public function waitForReady(
         string $videoId,
@@ -30,7 +76,7 @@ class FacebookVideoInspector
         for ($attempt = 1; $attempt <= self::MAX_ATTEMPTS; $attempt++) {
             $response = Http::timeout(60)->get($this->graphUrl("/{$videoId}"), [
                 'access_token' => $accessToken,
-                'fields' => 'status,permalink_url,published,title,format',
+                'fields' => self::VIDEO_FIELDS,
             ]);
 
             FacebookGraphResponse::assertSuccessful($response, 'consultar estado del video');
@@ -38,23 +84,27 @@ class FacebookVideoInspector
             $status = $response->json('status');
             $format = $response->json('format');
             $videoStatus = is_array($status) ? ($status['video_status'] ?? null) : null;
+            $publishStatus = self::extractPublishStatus(is_array($status) ? $status : null);
+            $embedIsReel = $this->formatEmbedIsReel($format);
 
             Log::info('facebook: video processing poll', [
                 'video_id' => $videoId,
                 'attempt' => $attempt,
                 'video_status' => $videoStatus,
+                'publish_status' => $publishStatus,
+                'embed_is_reel' => $embedIsReel,
+                'published' => $response->json('published'),
                 'status' => $status,
                 'format' => $format,
             ]);
 
             if ($videoStatus === 'ready') {
-                return [
-                    'video_status' => 'ready',
-                    'permalink_url' => $response->json('permalink_url'),
-                    'published' => $response->json('published'),
-                    'status' => $status,
-                    'format' => $format,
-                ];
+                return $this->normalizeInspection(
+                    $status,
+                    $response->json('published'),
+                    $response->json('permalink_url'),
+                    $format,
+                );
             }
 
             if (in_array($videoStatus, ['error', 'expired'], true)) {
@@ -76,6 +126,192 @@ class FacebookVideoInspector
             'Facebook no terminó de procesar el video (sigue en processing). '
             .'Elimínalo en Facebook e inténtalo de nuevo.',
         );
+    }
+
+    /**
+     * @return array{
+     *     video_status: ?string,
+     *     permalink_url: mixed,
+     *     published: mixed,
+     *     status: mixed,
+     *     format: mixed,
+     *     publish_status: ?string,
+     *     embed_is_reel: bool
+     * }
+     */
+    public function waitForPublicPublish(string $videoId, string $accessToken): array
+    {
+        $lastInfo = null;
+
+        for ($attempt = 1; $attempt <= self::PUBLISH_VISIBILITY_MAX_ATTEMPTS; $attempt++) {
+            $info = $this->inspect($videoId, $accessToken);
+            $lastInfo = $info;
+
+            Log::info('facebook: video publish visibility poll', [
+                'video_id' => $videoId,
+                'attempt' => $attempt,
+                'published' => $info['published'],
+                'publish_status' => $info['publish_status'],
+                'embed_is_reel' => $info['embed_is_reel'],
+            ]);
+
+            if ($this->isPubliclyPublished($info)) {
+                return $info;
+            }
+
+            if ($attempt < self::PUBLISH_VISIBILITY_MAX_ATTEMPTS) {
+                sleep(self::PUBLISH_VISIBILITY_SLEEP_SECONDS);
+            }
+        }
+
+        $publishStatus = is_array($lastInfo) ? ($lastInfo['publish_status'] ?? 'desconocido') : 'desconocido';
+
+        throw new RuntimeException(
+            "Meta procesó el video pero no quedó público (publish_status={$publishStatus}). "
+            .'Elimínalo en Facebook e inténtalo de nuevo.',
+        );
+    }
+
+    /**
+     * @return array{
+     *     video_status: ?string,
+     *     permalink_url: mixed,
+     *     published: mixed,
+     *     status: mixed,
+     *     format: mixed,
+     *     publish_status: ?string,
+     *     embed_is_reel: bool
+     * }
+     */
+    public function waitForScheduledOnMeta(string $videoId, string $accessToken): array
+    {
+        $lastInfo = null;
+
+        for ($attempt = 1; $attempt <= self::PUBLISH_VISIBILITY_MAX_ATTEMPTS; $attempt++) {
+            $info = $this->inspect($videoId, $accessToken);
+            $lastInfo = $info;
+
+            Log::info('facebook: video schedule visibility poll', [
+                'video_id' => $videoId,
+                'attempt' => $attempt,
+                'published' => $info['published'],
+                'publish_status' => $info['publish_status'],
+                'embed_is_reel' => $info['embed_is_reel'],
+            ]);
+
+            if ($this->isScheduledOnMeta($info)) {
+                return $info;
+            }
+
+            if ($attempt < self::PUBLISH_VISIBILITY_MAX_ATTEMPTS) {
+                sleep(self::PUBLISH_VISIBILITY_SLEEP_SECONDS);
+            }
+        }
+
+        $publishStatus = is_array($lastInfo) ? ($lastInfo['publish_status'] ?? 'desconocido') : 'desconocido';
+
+        throw new RuntimeException(
+            "Meta no confirmó la programación del video (publish_status={$publishStatus}). "
+            .'Elimínalo en Facebook e inténtalo de nuevo.',
+        );
+    }
+
+    /**
+     * @param  array{
+     *     video_status?: ?string,
+     *     published?: mixed,
+     *     publish_status?: ?string
+     * }  $info
+     */
+    public function isPubliclyPublished(array $info): bool
+    {
+        if (! $this->isPublishedFlag($info['published'] ?? null)) {
+            return false;
+        }
+
+        $publishStatus = $info['publish_status'] ?? null;
+
+        if ($publishStatus === 'scheduled') {
+            return false;
+        }
+
+        if ($publishStatus === 'published') {
+            return true;
+        }
+
+        return ($info['video_status'] ?? null) === 'ready';
+    }
+
+    /**
+     * @param  array{publish_status?: ?string}  $info
+     */
+    public function isScheduledOnMeta(array $info): bool
+    {
+        return ($info['publish_status'] ?? null) === 'scheduled';
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $status
+     */
+    public static function extractPublishStatus(?array $status): ?string
+    {
+        if ($status === null || ! isset($status['publishing_phase']) || ! is_array($status['publishing_phase'])) {
+            return null;
+        }
+
+        $publishStatus = $status['publishing_phase']['publish_status'] ?? null;
+
+        return is_string($publishStatus) ? $publishStatus : null;
+    }
+
+    /**
+     * @return array{
+     *     video_status: ?string,
+     *     permalink_url: mixed,
+     *     published: mixed,
+     *     status: mixed,
+     *     format: mixed,
+     *     publish_status: ?string,
+     *     embed_is_reel: bool
+     * }
+     */
+    private function normalizeInspection(mixed $status, mixed $published, mixed $permalink, mixed $format): array
+    {
+        $videoStatus = is_array($status) ? ($status['video_status'] ?? null) : null;
+
+        return [
+            'video_status' => is_string($videoStatus) ? $videoStatus : null,
+            'permalink_url' => $permalink,
+            'published' => $published,
+            'status' => $status,
+            'format' => $format,
+            'publish_status' => self::extractPublishStatus(is_array($status) ? $status : null),
+            'embed_is_reel' => $this->formatEmbedIsReel($format),
+        ];
+    }
+
+    private function isPublishedFlag(mixed $published): bool
+    {
+        return $published === true || $published === 1 || $published === 'true';
+    }
+
+    private function formatEmbedIsReel(mixed $format): bool
+    {
+        if (! is_array($format)) {
+            return false;
+        }
+
+        foreach ($format as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            if ($this->embedLooksLikeReel((string) ($item['embed_html'] ?? ''))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

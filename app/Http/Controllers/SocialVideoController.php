@@ -10,8 +10,10 @@ use App\SocialPublishing\Actions\GenerateSocialCaptionsAction;
 use App\SocialPublishing\Actions\GenerateSocialTitleAction;
 use App\SocialPublishing\Actions\PublishAllSocialPublicationsAction;
 use App\SocialPublishing\Actions\PublishSocialPublicationAction;
+use App\SocialPublishing\Actions\PromoteDueScheduledPublicationsAction;
 use App\SocialPublishing\Enums\Platform;
 use App\SocialPublishing\Enums\PublicationStatus;
+use App\SocialPublishing\Platforms\Facebook\FacebookPageFeedScheduler;
 use App\SocialPublishing\Platforms\Facebook\FacebookVideoDeleter;
 use App\SocialPublishing\Platforms\Facebook\FacebookVideoMetadata;
 use App\SocialPublishing\Platforms\Facebook\FacebookVideoPermalink;
@@ -88,10 +90,12 @@ class SocialVideoController extends Controller
         return redirect()->route('videos.index')->with('success', 'Video subido correctamente.');
     }
 
-    public function show(Request $request, SocialVideo $video): Response
+    public function show(Request $request, SocialVideo $video, PromoteDueScheduledPublicationsAction $promoteDueScheduled): Response
     {
         $this->authorizeVideo($request, $video);
 
+        $video->load('publications');
+        $promoteDueScheduled->execute($video);
         $video->load('publications');
 
         return Inertia::render('Videos/Show', [
@@ -285,6 +289,28 @@ class SocialVideoController extends Controller
         return back()->with('success', 'Enlace con Facebook limpiado. Ya puedes volver a enviar (programado o inmediato).');
     }
 
+    public function destroyPublication(
+        Request $request,
+        SocialVideo $video,
+        SocialPublication $publication,
+    ): RedirectResponse {
+        abort_unless($publication->social_video_id === $video->id, 404);
+
+        $this->authorizeVideo($request, $video);
+
+        if (! $publication->isRemovable()) {
+            return back()->with(
+                'error',
+                'No se puede quitar esta plataforma: ya fue publicada, está programada o el envío quedó registrado en la red.',
+            );
+        }
+
+        $label = $publication->platformLabel();
+        $publication->delete();
+
+        return back()->with('success', "Se quitó {$label} de este video.");
+    }
+
     public function destroy(Request $request, SocialVideo $video, DeleteSocialVideosAction $action): RedirectResponse
     {
         $this->authorizeVideo($request, $video);
@@ -367,11 +393,12 @@ class SocialVideoController extends Controller
                 'scheduled_at' => $p->scheduled_at?->toIso8601String(),
                 'published_at' => $p->published_at?->toIso8601String(),
                 'external_id' => $p->external_id,
-                'external_url' => $this->facebookPublicationUrl($p),
+                'external_url' => $this->publicPublicationUrl($p),
                 'last_error' => $detailed ? $p->last_error : null,
                 'api_response' => $detailed ? $p->api_response : null,
                 'coming_soon' => (bool) config("social.platforms.{$p->platform}.coming_soon"),
                 'platform_hints' => config("social.platforms.{$p->platform}.hints"),
+                'removable' => $p->isRemovable(),
             ])->values(),
             'max_video_mb' => (int) config('social.upload.max_video_mb', 500),
         ];
@@ -399,7 +426,8 @@ class SocialVideoController extends Controller
             return null;
         }
 
-        return (string) $value;
+        return \Illuminate\Support\Carbon::parse((string) $value, config('app.timezone'))
+            ->format('Y-m-d H:i:s');
     }
 
     private function publicStorageUrl(string $path): string
@@ -407,9 +435,22 @@ class SocialVideoController extends Controller
         return '/storage/'.ltrim($path, '/');
     }
 
+    private function publicPublicationUrl(SocialPublication $publication): ?string
+    {
+        if ($publication->status !== PublicationStatus::Published) {
+            return null;
+        }
+
+        if (str_starts_with($publication->platform, 'facebook_')) {
+            return $this->facebookPublicationUrl($publication);
+        }
+
+        return $publication->external_url;
+    }
+
     private function facebookPublicationUrl(SocialPublication $publication): ?string
     {
-        if ($publication->external_url === null || ! str_starts_with($publication->platform, 'facebook_')) {
+        if (! str_starts_with($publication->platform, 'facebook_')) {
             return $publication->external_url;
         }
 
@@ -420,13 +461,23 @@ class SocialVideoController extends Controller
         }
 
         $apiResponse = is_array($publication->api_response) ? $publication->api_response : [];
+        $postId = is_string($apiResponse['facebook_post_id'] ?? null) ? $apiResponse['facebook_post_id'] : null;
+
+        if ($postId !== null && $postId !== '') {
+            $postPermalink = is_string($apiResponse['facebook_post_permalink'] ?? null)
+                ? $apiResponse['facebook_post_permalink']
+                : null;
+
+            if ($postPermalink !== null && $postPermalink !== '') {
+                return FacebookVideoPermalink::build($videoId, 'page_video', null, $postPermalink);
+            }
+
+            return FacebookPageFeedScheduler::postUrl($postId);
+        }
+
         $contentType = is_string($apiResponse['content_type'] ?? null)
             ? $apiResponse['content_type']
             : 'page_video';
-
-        if ($contentType === 'reel') {
-            $contentType = 'page_video';
-        }
 
         $credentials = SocialPlatformAccount::facebookPageCredentials($publication->platform);
         $pageId = is_array($credentials) ? ($credentials['page_id'] ?? null) : null;
@@ -436,11 +487,15 @@ class SocialVideoController extends Controller
             $pageId = config("social.facebook.{$configKey}.page_id");
         }
 
+        $apiPermalink = is_string($apiResponse['facebook_permalink_api'] ?? null)
+            ? $apiResponse['facebook_permalink_api']
+            : $publication->external_url;
+
         return FacebookVideoPermalink::build(
             $videoId,
             $contentType,
             is_string($pageId) ? $pageId : null,
-            $publication->external_url,
+            $apiPermalink,
         );
     }
 

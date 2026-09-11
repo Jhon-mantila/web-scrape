@@ -57,4 +57,6 @@ Route::middleware('auth')->group(function () {
         ->name('videos.publications.publish');
     Route::delete('/videos/{video}/publications/{publication}/facebook', [SocialVideoController::class, 'destroyOnFacebook'])
         ->name('videos.publications.facebook.destroy');
+    Route::delete('/videos/{video}/publications/{publication}', [SocialVideoController::class, 'destroyPublication'])
+        ->name('videos.publications.destroy');
 });
