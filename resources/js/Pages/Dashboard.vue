@@ -16,19 +16,39 @@ const props = defineProps({
             unavailable: 0,
         }),
     },
+    article_stats: {
+        type: Object,
+        default: () => ({
+            total_articles: 0,
+            published: 0,
+            scheduled: 0,
+            failed: 0,
+            publishing: 0,
+            pending_slots: 0,
+        }),
+    },
     videos: {
         type: Array,
         default: () => [],
     },
 });
 
-const statCards = computed(() => [
+const videoStatCards = computed(() => [
     { key: 'total_videos', label: 'Videos subidos', value: props.stats.total_videos, class: 'text-white' },
     { key: 'pending', label: 'Pendientes', value: props.stats.pending, class: 'text-amber-300' },
     { key: 'scheduled', label: 'Programados', value: props.stats.scheduled, class: 'text-sky-300' },
     { key: 'published', label: 'Publicados', value: props.stats.published, class: 'text-emerald-300' },
     { key: 'failed', label: 'Con error', value: props.stats.failed, class: 'text-red-400' },
     { key: 'publishing', label: 'Publicando…', value: props.stats.publishing, class: 'text-violet-300' },
+]);
+
+const articleStatCards = computed(() => [
+    { key: 'total_articles', label: 'Artículos en BD', value: props.article_stats.total_articles, class: 'text-white' },
+    { key: 'pending_slots', label: 'Pend. en redes', value: props.article_stats.pending_slots, class: 'text-amber-300' },
+    { key: 'scheduled', label: 'Programados', value: props.article_stats.scheduled, class: 'text-sky-300' },
+    { key: 'published', label: 'Publicados', value: props.article_stats.published, class: 'text-emerald-300' },
+    { key: 'failed', label: 'Con error', value: props.article_stats.failed, class: 'text-red-400' },
+    { key: 'publishing', label: 'Publicando…', value: props.article_stats.publishing, class: 'text-violet-300' },
 ]);
 
 function formatDate(iso) {
@@ -51,6 +71,36 @@ function statusBadgeClass(status) {
         unavailable: 'border-slate-700 bg-slate-900/60 text-slate-500',
     }[status] ?? 'border-amber-900/50 bg-amber-950/40 text-amber-300';
 }
+
+function isYoutubeOrFacebook(platform) {
+    return platform === 'youtube' || platform.startsWith('facebook_');
+}
+
+function publicationDateLine(pub) {
+    if (pub.status === 'scheduled' && pub.scheduled_at) {
+        return `Programado: ${formatDate(pub.scheduled_at)}`;
+    }
+
+    if (pub.status === 'published' && pub.published_at) {
+        return `Publicado: ${formatDate(pub.published_at)}`;
+    }
+
+    if (pub.scheduled_at) {
+        return `Programado: ${formatDate(pub.scheduled_at)}`;
+    }
+
+    if (pub.published_at) {
+        return `Publicado: ${formatDate(pub.published_at)}`;
+    }
+
+    return null;
+}
+
+function schedulePublications(video) {
+    return video.publications.filter(
+        (pub) => isYoutubeOrFacebook(pub.platform) && publicationDateLine(pub),
+    );
+}
 </script>
 
 <template>
@@ -58,20 +108,41 @@ function statusBadgeClass(status) {
         <div class="mb-8 flex flex-wrap items-center justify-between gap-4">
             <div>
                 <h2 class="text-2xl font-semibold">Dashboard</h2>
-                <p class="mt-1 text-slate-400">Resumen de publicaciones de video.</p>
+                <p class="mt-1 text-slate-400">Resumen de videos y artículos WordPress.</p>
             </div>
-            <Link
-                :href="route('videos.create')"
-                class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium hover:bg-violet-500"
-            >
-                + Subir video
-            </Link>
+            <div class="flex flex-wrap gap-2">
+                <Link
+                    :href="route('articles.index')"
+                    class="rounded-lg border border-slate-600 px-4 py-2 text-sm hover:bg-slate-800"
+                >
+                    Artículos
+                </Link>
+                <Link
+                    :href="route('videos.create')"
+                    class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium hover:bg-violet-500"
+                >
+                    + Subir video
+                </Link>
+            </div>
         </div>
 
+        <h3 class="mb-3 text-sm font-medium text-slate-400">Videos</h3>
         <div class="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <div
-                v-for="card in statCards"
+                v-for="card in videoStatCards"
                 :key="card.key"
+                class="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-4"
+            >
+                <p class="text-xs text-slate-400">{{ card.label }}</p>
+                <p class="mt-1 text-2xl font-semibold" :class="card.class">{{ card.value }}</p>
+            </div>
+        </div>
+
+        <h3 class="mb-3 text-sm font-medium text-slate-400">Artículos WordPress</h3>
+        <div class="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div
+                v-for="card in articleStatCards"
+                :key="`article-${card.key}`"
                 class="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-4"
             >
                 <p class="text-xs text-slate-400">{{ card.label }}</p>
@@ -113,7 +184,9 @@ function statusBadgeClass(status) {
                         <div class="flex flex-wrap items-start justify-between gap-3">
                             <div>
                                 <h4 class="font-semibold">{{ video.title }}</h4>
-                                <p class="mt-0.5 text-xs text-slate-500">{{ formatDate(video.created_at) }}</p>
+                                <p class="mt-0.5 text-xs text-slate-500">
+                                    Subido: {{ formatDate(video.created_at) }}
+                                </p>
                             </div>
                             <Link
                                 :href="route('videos.show', video.id)"
@@ -133,6 +206,20 @@ function statusBadgeClass(status) {
                                 <span class="font-medium">{{ pub.platform_label }}</span>
                                 <span class="opacity-80">{{ pub.status_label }}</span>
                             </span>
+                        </div>
+                        <div
+                            v-if="schedulePublications(video).length > 0"
+                            class="mt-3 space-y-1 border-t border-slate-800 pt-3"
+                        >
+                            <p
+                                v-for="pub in schedulePublications(video)"
+                                :key="`date-${pub.id}`"
+                                class="text-xs"
+                                :class="pub.status === 'scheduled' ? 'text-sky-300' : 'text-slate-400'"
+                            >
+                                <span class="font-medium text-slate-300">{{ pub.platform_label }}</span>
+                                · {{ publicationDateLine(pub) }}
+                            </p>
                         </div>
                     </div>
                 </div>

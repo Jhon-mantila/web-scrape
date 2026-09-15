@@ -10,3 +10,35 @@
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
 }
+
+/* Barra de progreso Inertia (NProgress) — más visible durante subidas y envíos */
+#nprogress {
+    pointer-events: none;
+}
+
+#nprogress .bar {
+    height: 5px !important;
+    background: linear-gradient(90deg, #7c3aed, #c084fc, #e9d5ff) !important;
+    box-shadow:
+        0 0 10px rgb(168 85 247 / 80%),
+        0 0 4px rgb(192 132 252 / 90%);
+}
+
+#nprogress .peg {
+    box-shadow:
+        0 0 12px #a855f7,
+        0 0 6px #c084fc !important;
+}
+
+#nprogress .spinner {
+    top: 14px !important;
+    right: 14px !important;
+}
+
+#nprogress .spinner-icon {
+    width: 22px !important;
+    height: 22px !important;
+    border-width: 3px !important;
+    border-top-color: #c084fc !important;
+    border-left-color: #c084fc !important;
+}

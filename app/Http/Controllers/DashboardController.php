@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\SocialPublication;
 use App\Models\SocialVideo;
 use App\SocialPublishing\Enums\PublicationStatus;
+use App\Wordpress\WordpressArticleStats;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -37,6 +38,7 @@ class DashboardController extends Controller
 
         return Inertia::render('Dashboard', [
             'stats' => $stats,
+            'article_stats' => WordpressArticleStats::compute(),
             'videos' => $videos->map(fn (SocialVideo $video) => $this->videoItem($video))->values(),
         ]);
     }
@@ -68,6 +70,8 @@ class DashboardController extends Controller
             'status' => $p->status->value,
             'status_label' => $p->status->label(),
             'status_icon' => $p->status->icon(),
+            'scheduled_at' => $p->scheduled_at?->toIso8601String(),
+            'published_at' => $p->published_at?->toIso8601String(),
         ])->values();
 
         $hasActionNeeded = $video->publications->contains(

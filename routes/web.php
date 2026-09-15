@@ -7,6 +7,7 @@ use App\Http\Controllers\FacebookOAuthController;
 use App\Http\Controllers\LinkedInOAuthController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SocialVideoController;
+use App\Http\Controllers\WordpressArticleController;
 use App\Http\Controllers\YouTubeOAuthController;
 use Illuminate\Support\Facades\Route;
 
@@ -23,6 +24,16 @@ Route::middleware('auth')->group(function () {
     Route::post('logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+
+    Route::get('/articles', [WordpressArticleController::class, 'index'])->name('articles.index');
+    Route::post('/articles/sync', [WordpressArticleController::class, 'sync'])->name('articles.sync');
+    Route::post('/articles/{post}/generate-caption', [WordpressArticleController::class, 'generateCaption'])
+        ->name('articles.generate-caption');
+    Route::post('/articles/{post}/publish', [WordpressArticleController::class, 'publish'])->name('articles.publish');
+    Route::post('/articles/{post}/publish-batch', [WordpressArticleController::class, 'publishBatch'])
+        ->name('articles.publish-batch');
+    Route::delete('/articles/{post}/publications/{publication}/facebook', [WordpressArticleController::class, 'destroyOnFacebook'])
+        ->name('articles.publications.facebook.destroy');
 
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
 

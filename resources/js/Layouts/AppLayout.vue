@@ -11,6 +11,7 @@ const navItems = [
     { name: 'Scraper', route: null, soon: true },
     { name: 'IA', route: null, soon: true },
     { name: 'Videos', route: 'videos.index', active: 'videos.*', soon: false },
+    { name: 'Artículos', route: 'articles.index', active: 'articles.*', soon: false },
     { name: 'Historial', route: 'videos.index', active: null, soon: false },
     { name: 'Configuración', route: 'settings.index', active: 'settings.*', soon: false },
 ];
