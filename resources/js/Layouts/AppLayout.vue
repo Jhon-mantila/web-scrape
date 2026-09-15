@@ -1,6 +1,7 @@
 <script setup>
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
+import BackToTop from '@/Components/BackToTop.vue';
 import FlashMessage from '@/Components/FlashMessage.vue';
 
 const page = usePage();
@@ -8,7 +9,7 @@ const user = computed(() => page.props.auth?.user);
 
 const navItems = [
     { name: 'Dashboard', route: 'dashboard', active: 'dashboard', soon: false },
-    { name: 'Scraper', route: null, soon: true },
+    { name: 'Scraper', route: 'scraper.index', active: 'scraper.*', soon: false },
     { name: 'IA', route: null, soon: true },
     { name: 'Videos', route: 'videos.index', active: 'videos.*', soon: false },
     { name: 'Artículos', route: 'articles.index', active: 'articles.*', soon: false },
@@ -66,5 +67,7 @@ const navItems = [
                 <slot />
             </main>
         </div>
+
+        <BackToTop />
     </div>
 </template>

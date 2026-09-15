@@ -82,6 +82,26 @@ class WordPressClient
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function getPost(int $postId, ?WordPressAccount $account = null): array
+    {
+        $url = config('services.wordpress.url').'/wp-json/wp/v2/posts/'.$postId;
+
+        $response = $this->http($account)
+            ->timeout(30)
+            ->get($url, [
+                '_fields' => 'id,status,date,link,author',
+            ]);
+
+        if ($response->failed()) {
+            throw new RuntimeException('Error obteniendo post WordPress: '.$response->body());
+        }
+
+        return $response->json();
+    }
+
+    /**
      * Posts publicados o programados (future) cuya fecha cae en el rango indicado.
      *
      * @return list<array<string, mixed>>

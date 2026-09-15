@@ -16,8 +16,19 @@ class NewsAiArticle extends Model
         'raw_ai_response',
         'sent_wordpress',
         'sent_wordpress_at',
+        'wordpress_post_id',
+        'wordpress_status',
+        'wordpress_scheduled_at',
+        'wordpress_url',
+        'wordpress_author',
         'model',
         'article_type',
+    ];
+
+    protected $casts = [
+        'sent_wordpress' => 'boolean',
+        'sent_wordpress_at' => 'datetime',
+        'wordpress_scheduled_at' => 'datetime',
     ];
 
     public function news(): BelongsTo

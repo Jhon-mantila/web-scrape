@@ -15,6 +15,7 @@ class NewsPipeline extends Command
                             {--skip-scrape : Omite el scrape del listado de noticias}
                             {--skip-research : Omite la investigación con SearXNG}
                             {--skip-generate : Omite la generación FLUX cuando no hay imagen del scrape}
+                            {--skip-wordpress : Omite el envío a WordPress al final del pipeline}
                             {--show-errors : Muestra errores de generación IA en consola}';
 
     protected $description = 'Pipeline completo: scrape → detalles → imagen → investigación → IA → WordPress';
@@ -37,6 +38,7 @@ class NewsPipeline extends Command
             (bool) $this->option('skip-scrape'),
             (bool) $this->option('skip-research'),
             (bool) $this->option('skip-generate'),
+            (bool) $this->option('skip-wordpress'),
         );
 
         $timings = $summary['timings'] ?? [];
@@ -87,27 +89,29 @@ class NewsPipeline extends Command
             $timings['ai'] ?? null,
         ));
 
-        $wpLine = 'WordPress — procesadas: '.$summary['wordpress']['processed']
-            .' | OK: '.$summary['wordpress']['success']
-            .' | fallidas: '.$summary['wordpress']['failed'];
+        if (! $this->option('skip-wordpress')) {
+            $wpLine = 'WordPress — procesadas: '.$summary['wordpress']['processed']
+                .' | OK: '.$summary['wordpress']['success']
+                .' | fallidas: '.$summary['wordpress']['failed'];
 
-        if (($summary['wordpress']['by_author'] ?? []) !== []) {
-            $parts = [];
+            if (($summary['wordpress']['by_author'] ?? []) !== []) {
+                $parts = [];
 
-            foreach ($summary['wordpress']['by_author'] as $author => $count) {
-                $parts[] = "{$author}: {$count}";
+                foreach ($summary['wordpress']['by_author'] as $author => $count) {
+                    $parts[] = "{$author}: {$count}";
+                }
+
+                $wpLine .= ' | autores: '.implode(', ', $parts);
             }
 
-            $wpLine .= ' | autores: '.implode(', ', $parts);
-        }
+            $this->line($this->stepLine($step, $wpLine, $timings['wordpress'] ?? null));
 
-        $this->line($this->stepLine($step, $wpLine, $timings['wordpress'] ?? null));
-
-        if ($summary['wordpress']['processed'] === 0 && $summary['ai']['success'] > 0) {
-            $this->warn(
-                'IA generó artículos pero WordPress no envió ninguno. '
-                .'Vuelve a ejecutar; con el fix actual deberían marcarse como pendientes al regenerar.'
-            );
+            if ($summary['wordpress']['processed'] === 0 && $summary['ai']['success'] > 0) {
+                $this->warn(
+                    'IA generó artículos pero WordPress no envió ninguno. '
+                    .'Vuelve a ejecutar; con el fix actual deberían marcarse como pendientes al regenerar.'
+                );
+            }
         }
 
         if ($summary['ai']['failed'] > 0 && ($this->option('show-errors') || $this->output->isVerbose())) {

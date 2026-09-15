@@ -7,6 +7,7 @@ use App\Http\Controllers\FacebookOAuthController;
 use App\Http\Controllers\LinkedInOAuthController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SocialVideoController;
+use App\Http\Controllers\ScraperController;
 use App\Http\Controllers\WordpressArticleController;
 use App\Http\Controllers\YouTubeOAuthController;
 use Illuminate\Support\Facades\Route;
@@ -24,6 +25,12 @@ Route::middleware('auth')->group(function () {
     Route::post('logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+
+    Route::get('/scraper', [ScraperController::class, 'index'])->name('scraper.index');
+    Route::get('/scraper/news/{news}/preview', [ScraperController::class, 'preview'])->name('scraper.preview');
+    Route::post('/scraper/news/{news}/regenerate-ai', [ScraperController::class, 'regenerateAi'])->name('scraper.regenerate-ai');
+    Route::post('/scraper/sync-wordpress', [ScraperController::class, 'syncWordpressStatus'])->name('scraper.sync-wordpress');
+    Route::post('/scraper/pipeline', [ScraperController::class, 'runPipeline'])->name('scraper.pipeline');
 
     Route::get('/articles', [WordpressArticleController::class, 'index'])->name('articles.index');
     Route::post('/articles/sync', [WordpressArticleController::class, 'sync'])->name('articles.sync');

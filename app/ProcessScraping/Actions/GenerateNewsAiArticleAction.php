@@ -145,6 +145,11 @@ class GenerateNewsAiArticleAction
                             'article_type' => $articleType,
                             'sent_wordpress' => false,
                             'sent_wordpress_at' => null,
+                            'wordpress_post_id' => null,
+                            'wordpress_status' => null,
+                            'wordpress_scheduled_at' => null,
+                            'wordpress_url' => null,
+                            'wordpress_author' => null,
                         ],
                     );
                     $news->update(['status_ia' => 'processed']);

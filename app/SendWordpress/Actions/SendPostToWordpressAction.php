@@ -6,10 +6,12 @@ use App\Models\NewsAiArticle;
 use App\ProcessScraping\Actions\DownloadFeaturedImagesAction;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
+use App\SendWordpress\Support\WordpressPostMetaParser;
 use App\SendWordpress\WordPressAccount;
 use App\SendWordpress\WordPressAccountPool;
 use App\SendWordpress\WordPressClient;
 use App\SendWordpress\WordPressSchedulePlanner;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -22,6 +24,7 @@ class SendPostToWordpressAction
         private readonly DownloadFeaturedImagesAction $downloadImages,
         private readonly WordPressSchedulePlanner $schedulePlanner,
         private readonly WordPressAccountPool $accountPool,
+        private readonly WordpressPostMetaParser $postMetaParser,
     ) {}
 
     /**
@@ -100,12 +103,23 @@ class SendPostToWordpressAction
                     $payload['featured_media'] = $featuredMediaId;
                 }
 
-                $this->client->createPost($payload, $account);
+                $response = $this->client->createPost($payload, $account);
+                $meta = $this->postMetaParser->fromApiPost($response);
 
-                DB::transaction(function () use ($article) {
+                if ($mode === 'schedule' && $meta['scheduled_at'] === null && isset($payload['date'])) {
+                    $timezone = (string) config('services.wordpress.schedule_timezone', config('app.timezone', 'UTC'));
+                    $meta['scheduled_at'] = Carbon::parse((string) $payload['date'], $timezone);
+                }
+
+                DB::transaction(function () use ($article, $response, $meta, $account): void {
                     $article->update([
                         'sent_wordpress' => true,
                         'sent_wordpress_at' => now(),
+                        'wordpress_post_id' => $meta['post_id'] ?? ($response['id'] ?? null),
+                        'wordpress_status' => $meta['status'] ?? ($response['status'] ?? null),
+                        'wordpress_scheduled_at' => $meta['scheduled_at'],
+                        'wordpress_url' => $meta['url'] ?? ($response['link'] ?? null),
+                        'wordpress_author' => $account->user,
                     ]);
                 });
 

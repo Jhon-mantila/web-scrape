@@ -42,6 +42,7 @@ class RunNewsPipelineAction
         bool $skipScrape,
         bool $skipResearch,
         bool $skipGenerate = false,
+        bool $skipWordpress = false,
     ): array {
         $timings = [];
         $scrapeNewsCount = 0;
@@ -86,13 +87,23 @@ class RunNewsPipelineAction
             $this->ollama->unloadModels();
         }
 
-        $stepStarted = microtime(true);
-        $wordpress = $this->sendWordpress->execute(
-            $limit,
-            $mode,
-            $ai['news_ids'] ?? [],
-        );
-        $timings['wordpress'] = microtime(true) - $stepStarted;
+        if ($skipWordpress) {
+            $wordpress = [
+                'processed' => 0,
+                'success' => 0,
+                'failed' => 0,
+                'scheduled' => [],
+                'by_author' => [],
+            ];
+        } else {
+            $stepStarted = microtime(true);
+            $wordpress = $this->sendWordpress->execute(
+                $limit,
+                $mode,
+                $ai['news_ids'] ?? [],
+            );
+            $timings['wordpress'] = microtime(true) - $stepStarted;
+        }
 
         return [
             'scrape_news' => $scrapeNewsCount,
