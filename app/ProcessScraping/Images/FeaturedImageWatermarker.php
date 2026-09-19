@@ -23,9 +23,9 @@ class FeaturedImageWatermarker
         $logoPath = (string) config('services.featured_image.watermark_path');
 
         if ($logoPath === '' || ! is_readable($logoPath)) {
-            Log::warning('featured_image: logo de marca de agua no encontrado', ['path' => $logoPath]);
+            Log::warning('featured_image: logo de marca de agua no encontrado, solo normalizar', ['path' => $logoPath]);
 
-            return null;
+            return $this->normalizeOnly($relativePath);
         }
 
         $disk = Storage::disk('public');

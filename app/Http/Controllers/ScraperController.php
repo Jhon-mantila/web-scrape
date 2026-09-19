@@ -5,18 +5,22 @@ namespace App\Http\Controllers;
 use App\Models\News;
 use App\Models\NewsAiArticle;
 use App\Models\NewsDetail;
+use App\ProcessScraping\Actions\DownloadFeaturedImagesAction;
+use App\ProcessScraping\Actions\ProcessBackgroundRunQueueAction;
 use App\ProcessScraping\Actions\GenerateNewsAiArticleAction;
-use App\ProcessScraping\Actions\RunNewsPipelineAction;
+use App\Http\Support\RequestsBackgroundJson;
+use App\ProcessScraping\Support\PipelineRunState;
 use App\ProcessScraping\Ai\OllamaClient;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
 use App\Scraper\Support\NewsScraperStats;
-use App\SendWordpress\Actions\SendPostToWordpressAction;
+use App\SendWordpress\Actions\AttachWordpressFeaturedImagesAction;
 use App\SendWordpress\Actions\SyncWordpressScraperStatusAction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
@@ -25,6 +29,9 @@ use Throwable;
 
 class ScraperController extends Controller
 {
+    /** @var list<int> */
+    private const LIST_PER_PAGE_OPTIONS = [10, 15, 25, 50];
+
     public function index(Request $request): Response
     {
         $search = trim((string) $request->query('q', ''));
@@ -32,6 +39,11 @@ class ScraperController extends Controller
         $pendingAi = $request->boolean('pending_ai');
         $scheduledWp = $request->boolean('scheduled_wp');
         $failedOnly = $request->boolean('failed');
+        $perPage = (int) $request->query('per_page', 15);
+
+        if (! in_array($perPage, self::LIST_PER_PAGE_OPTIONS, true)) {
+            $perPage = 15;
+        }
 
         $query = News::query()
             ->with(['detail', 'aiArticle'])
@@ -78,7 +90,7 @@ class ScraperController extends Controller
             });
         }
 
-        $news = $query->paginate(15)->withQueryString();
+        $news = $query->paginate($perPage)->withQueryString();
 
         return Inertia::render('Scraper/Index', [
             'filters' => [
@@ -87,9 +99,13 @@ class ScraperController extends Controller
                 'pending_ai' => $pendingAi,
                 'scheduled_wp' => $scheduledWp,
                 'failed' => $failedOnly,
+                'per_page' => $perPage,
             ],
             'stats' => NewsScraperStats::compute(),
             'pipeline' => $this->pipelineSettings(),
+            'list' => [
+                'per_page_options' => self::LIST_PER_PAGE_OPTIONS,
+            ],
             'news' => $news->through(fn (News $item) => $this->newsPayload($item)),
         ]);
     }
@@ -168,6 +184,53 @@ class ScraperController extends Controller
         ]);
     }
 
+    public function attachWordpressFeaturedImages(Request $request, AttachWordpressFeaturedImagesAction $action): RedirectResponse
+    {
+        if (! filled(config('services.wordpress.url'))) {
+            return back()->with('error', 'WORDPRESS_URL no está configurado.');
+        }
+
+        $validated = $request->validate([
+            'limit' => 'nullable|integer|min:1|max:200',
+            'force' => 'boolean',
+        ]);
+
+        set_time_limit(0);
+
+        try {
+            $limit = isset($validated['limit']) ? (int) $validated['limit'] : 50;
+            $onlyMissing = ! ($validated['force'] ?? false);
+            $summary = $action->execute($limit, $onlyMissing);
+
+            if ($summary['attached'] === 0 && $summary['failed'] > 0) {
+                return back()->with(
+                    'error',
+                    'No se pudo adjuntar ninguna imagen ('.$summary['failed'].' errores). Revisa los logs.',
+                );
+            }
+
+            $message = 'Imágenes destacadas en WP: '.$summary['attached'].' asignadas';
+
+            if ($summary['skipped_has_featured'] > 0) {
+                $message .= ' · '.$summary['skipped_has_featured'].' ya tenían destacada';
+            }
+
+            if ($summary['skipped_no_local_image'] > 0) {
+                $message .= ' · '.$summary['skipped_no_local_image'].' sin archivo local';
+            }
+
+            if ($summary['failed'] > 0) {
+                $message .= ' · '.$summary['failed'].' errores';
+            }
+
+            return back()->with($summary['failed'] > 0 ? 'error' : 'success', $message);
+        } catch (Throwable $exception) {
+            Log::error('Adjuntar imágenes WP falló', ['message' => $exception->getMessage()]);
+
+            return back()->with('error', 'Error al adjuntar imágenes: '.$exception->getMessage());
+        }
+    }
+
     public function syncWordpressStatus(SyncWordpressScraperStatusAction $action): RedirectResponse
     {
         if (! filled(config('services.wordpress.url'))) {
@@ -202,11 +265,14 @@ class ScraperController extends Controller
         }
     }
 
-    public function runPipeline(
-        Request $request,
-        RunNewsPipelineAction $pipeline,
-        SendPostToWordpressAction $sendWordpress,
-    ): RedirectResponse {
+    public function runPipeline(Request $request): JsonResponse|RedirectResponse
+    {
+        $user = $request->user();
+
+        if ($user === null) {
+            abort(403);
+        }
+
         $shouldSendWordpress = $request->boolean('send_wordpress');
         $wordpressOnly = $request->boolean('wordpress_only');
 
@@ -226,52 +292,100 @@ class ScraperController extends Controller
             'include_raw_html' => 'boolean',
         ]);
 
-        $limit = (int) $validated['limit'];
-        $mode = (string) ($validated['mode'] ?? 'draft');
+        $options = [
+            ...$validated,
+            'send_wordpress' => $shouldSendWordpress,
+            'wordpress_only' => $wordpressOnly,
+            'mode' => (string) ($validated['mode'] ?? 'draft'),
+        ];
 
-        set_time_limit(0);
+        $run = PipelineRunState::start($user->id, $options);
 
         try {
-            if ($wordpressOnly) {
-                $summary = [
-                    'wordpress' => $sendWordpress->execute($limit, $mode),
-                ];
+            Bus::dispatchAfterResponse(function () use ($user): void {
+                app(ProcessBackgroundRunQueueAction::class)->execute($user->id);
+            });
+        } catch (Throwable $dispatchError) {
+            PipelineRunState::fail($user->id, 'No se pudo iniciar en segundo plano: '.$dispatchError->getMessage(), $run['id'] ?? null);
+            Log::error('Pipeline dispatch falló', ['message' => $dispatchError->getMessage()]);
 
-                return back()->with('success', $this->formatWordpressSummary($summary['wordpress'], $mode));
+            if (RequestsBackgroundJson::matches($request)) {
+                return response()->json(['message' => $dispatchError->getMessage()], 500);
             }
 
-            $summary = $pipeline->execute(
-                $limit,
-                $mode,
-                (bool) ($validated['force'] ?? false),
-                (bool) ($validated['include_raw_html'] ?? false),
-                (bool) ($validated['skip_scrape'] ?? false),
-                (bool) ($validated['skip_research'] ?? false),
-                (bool) ($validated['skip_generate'] ?? false),
-                ! $shouldSendWordpress,
-            );
-
-            $message = $this->formatPipelineSummary($summary, [
-                ...$validated,
-                'send_wordpress' => $shouldSendWordpress,
-            ]);
-
-            $hasFailures = ($summary['ai']['failed'] ?? 0) > 0
-                || ($shouldSendWordpress && ($summary['wordpress']['failed'] ?? 0) > 0);
-
-            if ($hasFailures) {
-                return back()->with('error', $message);
-            }
-
-            return back()->with('success', $message);
-        } catch (Throwable $exception) {
-            Log::error('Pipeline scraper falló desde UI', [
-                'message' => $exception->getMessage(),
-                'trace' => $exception->getTraceAsString(),
-            ]);
-
-            return back()->with('error', 'Error en el pipeline: '.$exception->getMessage());
+            return back()->with('error', 'No se pudo iniciar el pipeline en segundo plano.');
         }
+
+        if (RequestsBackgroundJson::matches($request)) {
+            $snapshot = PipelineRunState::snapshot($user->id);
+
+            return response()->json([
+                'message' => ($run['status'] ?? '') === 'queued'
+                    ? 'Pipeline en cola. Se ejecutará cuando termine el proceso anterior.'
+                    : 'Pipeline iniciado en segundo plano.',
+                'run' => $run,
+                'snapshot' => $snapshot,
+            ]);
+        }
+
+        return back()->with([
+            'success' => 'Pipeline iniciado en segundo plano. Puedes navegar por la app; el progreso aparece abajo a la derecha.',
+            'background_run_snapshot' => PipelineRunState::snapshot($user->id),
+        ]);
+    }
+
+    public function pipelineStatus(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if ($user === null) {
+            abort(403);
+        }
+
+        return response()->json(PipelineRunState::snapshot($user->id));
+    }
+
+    public function dismissPipelineRun(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if ($user === null) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'run_id' => 'nullable|string',
+            'clear_finished' => 'boolean',
+        ]);
+
+        if ($validated['clear_finished'] ?? false) {
+            $snapshot = PipelineRunState::snapshot($user->id);
+
+            foreach ($snapshot['runs'] as $run) {
+                if (in_array($run['status'] ?? '', ['completed', 'failed'], true)) {
+                    PipelineRunState::dismiss($user->id, $run['id']);
+                }
+            }
+
+            return response()->json(PipelineRunState::snapshot($user->id));
+        }
+
+        $runId = $validated['run_id'] ?? null;
+
+        if ($runId !== null) {
+            $run = collect(PipelineRunState::snapshot($user->id)['runs'])->firstWhere('id', $runId);
+
+            if ($run !== null && in_array($run['status'] ?? '', ['running', 'queued'], true)) {
+                return response()->json([
+                    'message' => 'Ese proceso sigue activo; minimiza el panel para ocultarlo.',
+                    ...PipelineRunState::snapshot($user->id),
+                ], 422);
+            }
+
+            PipelineRunState::dismiss($user->id, $runId);
+        }
+
+        return response()->json(PipelineRunState::snapshot($user->id));
     }
 
     /**
@@ -322,7 +436,8 @@ class ScraperController extends Controller
             'created_at' => $news->created_at?->toIso8601String(),
             'detail' => $detail ? [
                 'status' => $detail->status,
-                'has_image' => filled($detail->featured_image_path),
+                'has_image' => $detail->status === 'processed'
+                    && app(DownloadFeaturedImagesAction::class)->featuredImageExists($news),
                 'researched' => $detail->researched_at !== null,
                 'scraped_at' => $detail->scraped_at?->toIso8601String(),
                 'last_error' => $detail->last_error,
@@ -390,8 +505,16 @@ class ScraperController extends Controller
     {
         $path = $detail?->featured_image_path;
 
-        if (filled($path) && Storage::disk('public')->exists($path)) {
-            return '/storage/'.ltrim($path, '/');
+        if (filled($path)) {
+            if (Storage::disk('public')->exists($path)) {
+                return '/storage/'.ltrim($path, '/');
+            }
+
+            foreach ($this->alternateFeaturedImagePaths($path) as $candidate) {
+                if (Storage::disk('public')->exists($candidate)) {
+                    return '/storage/'.ltrim($candidate, '/');
+                }
+            }
         }
 
         $listingImage = $news->image;
@@ -404,68 +527,34 @@ class ScraperController extends Controller
     }
 
     /**
+     * @return list<string>
+     */
+    private function alternateFeaturedImagePaths(string $path): array
+    {
+        $info = pathinfo($path);
+        $dir = $info['dirname'] ?? '';
+        $filename = $info['filename'] ?? '';
+
+        if ($filename === '') {
+            return [];
+        }
+
+        $prefix = $dir !== '' && $dir !== '.' ? $dir.'/' : '';
+        $candidates = [];
+
+        foreach (['webp', 'jpg', 'jpeg', 'png'] as $extension) {
+            $candidate = $prefix.$filename.'.'.$extension;
+
+            if ($candidate !== $path) {
+                $candidates[] = $candidate;
+            }
+        }
+
+        return $candidates;
+    }
+
+    /**
      * @param  array<string, mixed>  $summary
      * @param  array<string, mixed>  $options
      */
-    private function formatPipelineSummary(array $summary, array $options): string
-    {
-        $parts = [];
-
-        if (! ($options['skip_scrape'] ?? false)) {
-            $parts[] = 'Listado: '.($summary['scrape_news'] ?? 0).' nuevas';
-        }
-
-        $parts[] = 'Detalles OK '.$summary['details']['success'].'/'.$summary['details']['processed'];
-        $parts[] = 'Imágenes '.$summary['images']['downloaded'].' desc. · '.$summary['images']['generated'].' FLUX';
-
-        if (! ($options['skip_research'] ?? false)) {
-            $parts[] = 'Research OK '.$summary['research']['success'].'/'.$summary['research']['processed'];
-        }
-
-        $parts[] = 'IA OK '.$summary['ai']['success'].'/'.$summary['ai']['processed'];
-
-        if ($options['send_wordpress'] ?? false) {
-            $parts[] = $this->wordpressLine($summary['wordpress'], (string) ($options['mode'] ?? 'draft'));
-        } else {
-            $parts[] = 'WP omitido';
-        }
-
-        if (($summary['ai']['failed'] ?? 0) > 0) {
-            $parts[] = 'IA fallidas: '.$summary['ai']['failed'];
-        }
-
-        return 'Pipeline: '.implode(' · ', $parts);
-    }
-
-    /**
-     * @param  array<string, mixed>  $wordpress
-     */
-    private function formatWordpressSummary(array $wordpress, string $mode): string
-    {
-        return 'WordPress ('.$mode.'): '.$this->wordpressLine($wordpress, $mode);
-    }
-
-    /**
-     * @param  array<string, mixed>  $wordpress
-     */
-    private function wordpressLine(array $wordpress, string $mode): string
-    {
-        $line = 'WP ('.$mode.') OK '.$wordpress['success'].'/'.$wordpress['processed'];
-
-        if (($wordpress['by_author'] ?? []) !== []) {
-            $authors = [];
-
-            foreach ($wordpress['by_author'] as $author => $count) {
-                $authors[] = "{$author}: {$count}";
-            }
-
-            $line .= ' ['.implode(', ', $authors).']';
-        }
-
-        if ($mode === 'schedule' && ($wordpress['scheduled'] ?? []) !== []) {
-            $line .= ' · '.count($wordpress['scheduled']).' programados';
-        }
-
-        return $line;
-    }
 }

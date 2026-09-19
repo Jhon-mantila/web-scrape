@@ -48,6 +48,19 @@ class WordPressAccountPool
         return $accounts[$index % count($accounts)];
     }
 
+    public function forUsername(?string $username): WordPressAccount
+    {
+        if ($username !== null && $username !== '') {
+            foreach ($this->all() as $account) {
+                if ($account->user === $username) {
+                    return $account;
+                }
+            }
+        }
+
+        return $this->forIndex(0);
+    }
+
     public function hasMultiple(): bool
     {
         return count($this->all()) > 1;

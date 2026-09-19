@@ -8,7 +8,9 @@ use Illuminate\Console\Command;
 
 class ScrapeNewsDetails extends Command
 {
-    protected $signature = 'scrape:news:details {--limit=30 : Cantidad de URLs a procesar} {--force : Reprocesa aunque ya esten procesadas}';
+    protected $signature = 'news:scrape-details|scrape:news:details
+                            {--limit=30 : Cantidad de URLs a procesar}
+                            {--force : Reprocesa aunque ya esten procesadas}';
 
     protected $description = 'Entra a cada URL guardada en news y extrae contenido detallado';
 

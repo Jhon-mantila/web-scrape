@@ -1,6 +1,7 @@
 <script setup>
-import { Link, router, useForm } from '@inertiajs/vue3';
 import axios from 'axios';
+import { Link, router, useForm } from '@inertiajs/vue3';
+import { syncBackgroundRunAfterInertiaStart } from '@/support/backgroundRun.js';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
@@ -13,6 +14,13 @@ const props = defineProps({
             pending_ai: false,
             scheduled_wp: false,
             failed: false,
+            per_page: 15,
+        }),
+    },
+    list: {
+        type: Object,
+        default: () => ({
+            per_page_options: [10, 15, 25, 50],
         }),
     },
     stats: {
@@ -66,6 +74,10 @@ const pipelineForm = useForm({
 });
 
 const syncWpForm = useForm({});
+const attachFeaturedForm = useForm({
+    limit: 50,
+    force: false,
+});
 
 const statCards = computed(() => [
     { key: 'total_news', label: 'Noticias', value: props.stats.total_news, class: 'text-white' },
@@ -77,6 +89,57 @@ const statCards = computed(() => [
     { key: 'failed_details', label: 'Detalle error', value: props.stats.failed_details, class: 'text-red-400' },
     { key: 'failed_ai', label: 'IA error', value: props.stats.failed_ai, class: 'text-red-400' },
 ]);
+
+const hasActiveListFilters = computed(() => {
+    const f = props.filters;
+
+    return Boolean(
+        (f.q && String(f.q).trim() !== '')
+            || f.pending_wordpress
+            || f.pending_ai
+            || f.scheduled_wp
+            || f.failed,
+    );
+});
+
+const listPaginationSummary = computed(() => {
+    const paginator = props.news;
+    const total = paginator.total ?? 0;
+    const perPage = paginator.per_page ?? props.filters.per_page ?? 15;
+    const currentPage = paginator.current_page ?? 1;
+    const lastPage = paginator.last_page ?? 1;
+    const from = paginator.from ?? 0;
+    const to = paginator.to ?? 0;
+    const totalAll = props.stats.total_news ?? total;
+
+    if (total === 0) {
+        if (hasActiveListFilters.value) {
+            return {
+                headline: '0 resultados con los filtros actuales',
+                detail: `${totalAll} noticias en total en la base de datos`,
+            };
+        }
+
+        return {
+            headline: '0 noticias',
+            detail: null,
+        };
+    }
+
+    const range = from && to ? `${from}–${to}` : `${paginator.data?.length ?? 0}`;
+
+    if (hasActiveListFilters.value) {
+        return {
+            headline: `${total} ${total === 1 ? 'resultado filtrado' : 'resultados filtrados'} · mostrando ${range}`,
+            detail: `${totalAll} noticias en total · ${perPage} por página · página ${currentPage} de ${lastPage}`,
+        };
+    }
+
+    return {
+        headline: `${totalAll} noticias en total · mostrando ${range}`,
+        detail: `${perPage} por página · página ${currentPage} de ${lastPage}`,
+    };
+});
 
 const scheduleSummary = computed(() => {
     const buffer = props.stats.schedule_buffer_days;
@@ -217,8 +280,10 @@ const modeHelp = computed(() => {
     return 'Guarda como borrador en Esquina Anime.';
 });
 
+const pipelineStarting = ref(false);
+
 const runDisabled = computed(() => {
-    if (pipelineForm.processing) {
+    if (pipelineForm.processing || pipelineStarting.value) {
         return true;
     }
 
@@ -309,6 +374,7 @@ function applyFilters(overrides = {}) {
         route('scraper.index'),
         {
             q: searchQuery.value || undefined,
+            per_page: props.filters.per_page || undefined,
             pending_wordpress: props.filters.pending_wordpress || undefined,
             pending_ai: props.filters.pending_ai || undefined,
             scheduled_wp: props.filters.scheduled_wp || undefined,
@@ -319,9 +385,13 @@ function applyFilters(overrides = {}) {
     );
 }
 
+function changeListPerPage(perPage) {
+    applyFilters({ per_page: perPage, page: 1 });
+}
+
 function onSearchInput() {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => applyFilters({ q: searchQuery.value || undefined }), 350);
+    searchTimer = setTimeout(() => applyFilters({ q: searchQuery.value || undefined, page: 1 }), 350);
 }
 
 function clearSearch() {
@@ -335,13 +405,44 @@ function applyPreset(preset) {
 }
 
 function runPipeline() {
-    pipelineForm.post(route('scraper.pipeline'), {
+    if (runDisabled.value || pipelineStarting.value) {
+        return;
+    }
+
+    pipelineStarting.value = true;
+    pipelineForm.clearErrors();
+
+    router.post(route('scraper.pipeline'), pipelineForm.data(), {
         preserveScroll: true,
+        preserveState: true,
+        onSuccess: (page) => {
+            void syncBackgroundRunAfterInertiaStart(page);
+        },
+        onError: () => {
+            window.alert('No se pudo iniciar el pipeline.');
+        },
+        onFinish: () => {
+            pipelineStarting.value = false;
+        },
     });
 }
 
 function syncWordpressStatus() {
     syncWpForm.post(route('scraper.sync-wordpress'), {
+        preserveScroll: true,
+    });
+}
+
+function attachWordpressFeaturedImages() {
+    if (
+        !window.confirm(
+            '¿Subir imágenes locales y asignarlas como destacada en posts WordPress ya enviados? Solo entradas sin imagen destacada en WP (salvo que marques forzar).',
+        )
+    ) {
+        return;
+    }
+
+    attachFeaturedForm.post(route('scraper.attach-wordpress-featured-images'), {
         preserveScroll: true,
     });
 }
@@ -539,15 +640,34 @@ function closePreview() {
                             Estado guardado en BD al enviar. Usa sincronizar para actualizar si ya publicaron en WP.
                         </p>
                     </div>
-                    <button
-                        type="button"
-                        class="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
-                        :disabled="syncWpForm.processing || !pipeline.wordpress_configured"
-                        @click="syncWordpressStatus"
-                    >
-                        {{ syncWpForm.processing ? 'Sincronizando…' : 'Sincronizar estado WP' }}
-                    </button>
+                    <div class="flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            class="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                            :disabled="syncWpForm.processing || !pipeline.wordpress_configured"
+                            @click="syncWordpressStatus"
+                        >
+                            {{ syncWpForm.processing ? 'Sincronizando…' : 'Sincronizar estado WP' }}
+                        </button>
+                        <button
+                            type="button"
+                            class="rounded-lg border border-violet-600/60 px-3 py-1.5 text-sm text-violet-200 hover:bg-violet-950/40 disabled:opacity-50"
+                            :disabled="attachFeaturedForm.processing || !pipeline.wordpress_configured"
+                            @click="attachWordpressFeaturedImages"
+                        >
+                            {{
+                                attachFeaturedForm.processing
+                                    ? 'Subiendo imágenes…'
+                                    : 'Adjuntar destacadas WP'
+                            }}
+                        </button>
+                    </div>
                 </div>
+                <p class="mt-2 text-xs text-slate-600">
+                    Adjuntar destacadas: hasta {{ attachFeaturedForm.limit }} posts sin imagen en WP.
+                    CLI:
+                    <code class="text-slate-500">news:attach-wordpress-featured-images --all</code>
+                </p>
 
                 <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
                     <div class="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2.5">
@@ -703,7 +823,7 @@ function closePreview() {
                         :disabled="runDisabled"
                         @click="runPipeline"
                     >
-                        {{ runLabel }}
+                        {{ pipelineStarting ? 'Iniciando…' : runLabel }}
                     </button>
                 </div>
 
@@ -766,7 +886,7 @@ function closePreview() {
                         type="checkbox"
                         :checked="filters.pending_wordpress"
                         class="rounded border-slate-600 bg-slate-950"
-                        @change="applyFilters({ pending_wordpress: $event.target.checked || undefined })"
+                        @change="applyFilters({ pending_wordpress: $event.target.checked || undefined, page: 1 })"
                     />
                     <span class="whitespace-nowrap">Pend. WordPress</span>
                 </label>
@@ -776,7 +896,7 @@ function closePreview() {
                         type="checkbox"
                         :checked="filters.pending_ai"
                         class="rounded border-slate-600 bg-slate-950"
-                        @change="applyFilters({ pending_ai: $event.target.checked || undefined })"
+                        @change="applyFilters({ pending_ai: $event.target.checked || undefined, page: 1 })"
                     />
                     <span class="whitespace-nowrap">Pend. IA</span>
                 </label>
@@ -786,7 +906,7 @@ function closePreview() {
                         type="checkbox"
                         :checked="filters.scheduled_wp"
                         class="rounded border-slate-600 bg-slate-950"
-                        @change="applyFilters({ scheduled_wp: $event.target.checked || undefined })"
+                        @change="applyFilters({ scheduled_wp: $event.target.checked || undefined, page: 1 })"
                     />
                     <span class="whitespace-nowrap">Programados WP</span>
                 </label>
@@ -796,16 +916,53 @@ function closePreview() {
                         type="checkbox"
                         :checked="filters.failed"
                         class="rounded border-slate-600 bg-slate-950"
-                        @change="applyFilters({ failed: $event.target.checked || undefined })"
+                        @change="applyFilters({ failed: $event.target.checked || undefined, page: 1 })"
                     />
                     <span class="whitespace-nowrap">Con error</span>
                 </label>
+
+                <div class="hidden h-5 w-px bg-slate-700 sm:block" />
+
+                <label class="flex items-center gap-1.5 text-sm text-slate-400">
+                    <span class="whitespace-nowrap">Por página</span>
+                    <select
+                        :value="filters.per_page ?? news.per_page ?? 15"
+                        class="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-white"
+                        @change="changeListPerPage(Number($event.target.value))"
+                    >
+                        <option
+                            v-for="n in list.per_page_options"
+                            :key="n"
+                            :value="n"
+                        >
+                            {{ n }}
+                        </option>
+                    </select>
+                </label>
+            </div>
+
+            <div
+                class="mb-4 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2 text-sm"
+                :class="hasActiveListFilters ? 'text-sky-200' : 'text-slate-300'"
+            >
+                <p class="font-medium">{{ listPaginationSummary.headline }}</p>
+                <p v-if="listPaginationSummary.detail" class="mt-0.5 text-xs text-slate-500">
+                    {{ listPaginationSummary.detail }}
+                </p>
             </div>
 
             <div v-if="news.data.length === 0" class="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-slate-400">
-                <template v-if="filters.q">
-                    No hay resultados para «{{ filters.q }}».
-                    <button type="button" class="ml-1 text-violet-400 hover:underline" @click="clearSearch">
+                <template v-if="hasActiveListFilters">
+                    <p>{{ listPaginationSummary.headline }}</p>
+                    <p v-if="listPaginationSummary.detail" class="mt-2 text-sm text-slate-500">
+                        {{ listPaginationSummary.detail }}
+                    </p>
+                    <button
+                        v-if="filters.q"
+                        type="button"
+                        class="mt-3 text-violet-400 hover:underline"
+                        @click="clearSearch"
+                    >
                         Limpiar búsqueda
                     </button>
                 </template>
@@ -909,6 +1066,11 @@ function closePreview() {
                     </div>
                 </article>
 
+                <p class="pt-2 text-center text-xs text-slate-500">
+                    {{ listPaginationSummary.headline }}
+                    <span v-if="listPaginationSummary.detail"> · {{ listPaginationSummary.detail }}</span>
+                </p>
+
                 <div v-if="news.links?.length > 3" class="flex flex-wrap justify-center gap-1 pt-4">
                     <Link
                         v-for="link in news.links"
@@ -928,7 +1090,7 @@ function closePreview() {
 
         <div
             v-if="previewOpen"
-            class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+            class="fixed inset-0 z-[10050] flex items-center justify-center bg-black/75 p-4"
             @click.self="closePreview"
         >
             <div class="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">

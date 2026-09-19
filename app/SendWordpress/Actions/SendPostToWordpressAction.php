@@ -3,9 +3,9 @@
 namespace App\SendWordpress\Actions;
 
 use App\Models\NewsAiArticle;
-use App\ProcessScraping\Actions\DownloadFeaturedImagesAction;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
+use App\SendWordpress\Support\WordpressFeaturedMediaUploader;
 use App\SendWordpress\Support\WordpressPostMetaParser;
 use App\SendWordpress\WordPressAccount;
 use App\SendWordpress\WordPressAccountPool;
@@ -14,14 +14,13 @@ use App\SendWordpress\WordPressSchedulePlanner;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class SendPostToWordpressAction
 {
     public function __construct(
         private readonly WordPressClient $client,
-        private readonly DownloadFeaturedImagesAction $downloadImages,
+        private readonly WordpressFeaturedMediaUploader $featuredMediaUploader,
         private readonly WordPressSchedulePlanner $schedulePlanner,
         private readonly WordPressAccountPool $accountPool,
         private readonly WordpressPostMetaParser $postMetaParser,
@@ -98,7 +97,7 @@ class SendPostToWordpressAction
                     ];
                 }
 
-                $featuredMediaId = $this->resolveFeaturedMediaId($article, $account, $postTitle);
+                $featuredMediaId = $this->featuredMediaUploader->uploadForArticle($article, $account);
                 if ($featuredMediaId !== null) {
                     $payload['featured_media'] = $featuredMediaId;
                 }
@@ -152,57 +151,5 @@ class SendPostToWordpressAction
             'scheduled' => $scheduled,
             'by_author' => $byAuthor,
         ];
-    }
-
-    private function resolveFeaturedMediaId(NewsAiArticle $article, WordPressAccount $account, string $title): ?int
-    {
-        $article->loadMissing('news.detail');
-        $imagePath = $article->news->detail?->featured_image_path;
-
-        if (($imagePath === null || $imagePath === '') && $article->news !== null) {
-            $this->downloadImages->downloadForNews($article->news);
-            $article->load('news.detail');
-            $imagePath = $article->news->detail?->featured_image_path;
-        }
-
-        if ($imagePath === null || $imagePath === '') {
-            Log::info('wordpress: sin imagen destacada para el artículo', [
-                'news_ai_id' => $article->id,
-                'news_id' => $article->news_id,
-            ]);
-
-            return null;
-        }
-
-        if (! Storage::disk('public')->exists($imagePath)) {
-            return null;
-        }
-
-        $fullPath = Storage::disk('public')->path($imagePath);
-
-        try {
-            $media = $this->client->uploadMedia($fullPath, basename($imagePath), $account, $title);
-            $mediaId = $media['id'] ?? null;
-
-            Log::info('wordpress: imagen destacada subida', [
-                'news_ai_id' => $article->id,
-                'media_id' => $mediaId,
-                'path' => $imagePath,
-                'author' => $account->user,
-                'media_title' => $title,
-                'alt_text' => $media['alt_text'] ?? $title,
-            ]);
-
-            return $mediaId;
-        } catch (Throwable $e) {
-            Log::warning('wordpress: no se pudo subir imagen destacada', [
-                'news_ai_id' => $article->id,
-                'path' => $imagePath,
-                'author' => $account->user,
-                'error' => $e->getMessage(),
-            ]);
-
-            return null;
-        }
     }
 }

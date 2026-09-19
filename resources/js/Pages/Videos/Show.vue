@@ -1,5 +1,6 @@
 <script setup>
 import { Link, router, useForm } from '@inertiajs/vue3';
+import { syncBackgroundRunAfterInertiaStart } from '@/support/backgroundRun.js';
 import { computed, ref, watch } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import FilePicker from '@/Components/FilePicker.vue';
@@ -133,6 +134,32 @@ const payload = () => ({
     publications: form.publications,
 });
 
+const publishing = ref(false);
+
+function postSocialPublish(url, body) {
+    if (publishing.value) {
+        return;
+    }
+
+    publishing.value = true;
+
+    router.post(url, body, {
+        preserveScroll: true,
+        preserveState: true,
+        onSuccess: (page) => {
+            void syncBackgroundRunAfterInertiaStart(page);
+        },
+        onError: (errors) => {
+            const message = typeof errors === 'object' ? Object.values(errors).flat().join(' ') : 'No se pudo iniciar la publicación.';
+
+            window.alert(message || 'No se pudo iniciar la publicación.');
+        },
+        onFinish: () => {
+            publishing.value = false;
+        },
+    });
+}
+
 function onThumbnailSelected(file) {
     if (thumbnailPreview.value) {
         URL.revokeObjectURL(thumbnailPreview.value);
@@ -220,7 +247,7 @@ function canSend(pub) {
 }
 
 function publish(publicationId) {
-    router.post(route('videos.publications.publish', [props.video.id, publicationId]), payload());
+    postSocialPublish(route('videos.publications.publish', [props.video.id, publicationId]), payload());
 }
 
 function facebookVideoId(pub) {
@@ -279,7 +306,7 @@ function publishSelected() {
         return;
     }
 
-    router.post(route('videos.publish-all', props.video.id), {
+    postSocialPublish(route('videos.publish-all', props.video.id), {
         ...payload(),
         publication_ids: selectedPublicationIds.value.filter((id) =>
             publishablePublications.value.some((p) => p.id === id),

@@ -40,10 +40,12 @@ class AnimeNewsScraper extends BaseScraper implements ScraperInterface
                 ? trim($node->filter('h3 a')->text()) 
                 : null;
 
-            /*$image = $node->filter('.thumbnail')->count()
-            ? $this->extractImageFromStyle($node->filter('.thumbnail')->attr('style'))
-            : null;*/
-            
+            $image = null;
+
+            if ($node->filter('.thumbnail')->count() > 0) {
+                $image = $this->extractImageFromStyle($node->filter('.thumbnail')->attr('style'), $baseUrl);
+            }
+
             $category = $node->filter('.topics a')->count() 
             ? trim($node->filter('.topics a')->first()->text()) 
             : null;
@@ -55,12 +57,39 @@ class AnimeNewsScraper extends BaseScraper implements ScraperInterface
                     title: $title,
                     url: $url,
                     source: 'anime_news',
-                    category: $category
-
+                    image: $image,
+                    category: $category,
                 );
             }
         });
 
         return $news;
+    }
+
+    private function extractImageFromStyle(?string $style, string $baseUrl): ?string
+    {
+        if ($style === null || $style === '') {
+            return null;
+        }
+
+        if (! preg_match('/background-image:\s*url\([\'"]?([^\'")]+)[\'"]?\)/i', $style, $matches)) {
+            return null;
+        }
+
+        $url = trim($matches[1]);
+
+        if ($url === '') {
+            return null;
+        }
+
+        if (str_starts_with($url, 'http://') || str_starts_with($url, 'https://')) {
+            return $url;
+        }
+
+        if (str_starts_with($url, '//')) {
+            return 'https:'.$url;
+        }
+
+        return rtrim($baseUrl, '/').'/'.ltrim($url, '/');
     }
 }

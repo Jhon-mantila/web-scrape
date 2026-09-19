@@ -250,12 +250,24 @@ function linkedinDisconnectUrl(account) {
                             {{ facebookEsquinaweb.connected ? '✅ Conectado' : '⏳ Sin conectar' }}
                         </p>
                         <p
+                            v-if="facebookEsquinaweb.connected && facebookEsquinaweb.renewal?.connected_at"
+                            class="mt-1 text-xs text-slate-500"
+                        >
+                            Conectado el {{ formatDate(facebookEsquinaweb.renewal.connected_at) }}
+                        </p>
+                        <p
                             v-if="facebookEsquinaweb.connected && facebookEsquinaweb.renewal"
                             class="mt-2 text-sm"
                             :class="renewalClass(facebookEsquinaweb.renewal)"
                         >
                             <template v-if="facebookEsquinaweb.renewal.source === 'oauth'">
-                                Renovar antes del {{ formatDate(facebookEsquinaweb.renewal.expires_at) }}
+                                <span v-if="facebookEsquinaweb.renewal.is_expired">Token vencido — vuelve a conectar</span>
+                                <span v-else>
+                                    Renovar antes del {{ formatDate(facebookEsquinaweb.renewal.expires_at) }}
+                                    <span v-if="facebookEsquinaweb.renewal.days_remaining !== null">
+                                        ({{ facebookEsquinaweb.renewal.days_remaining }} d)
+                                    </span>
+                                </span>
                             </template>
                             <template v-else>{{ facebookEsquinaweb.renewal.message }}</template>
                         </p>
@@ -302,12 +314,24 @@ function linkedinDisconnectUrl(account) {
                             {{ facebookEsquinagamers.connected ? '✅ Conectado' : '⏳ Sin conectar' }}
                         </p>
                         <p
+                            v-if="facebookEsquinagamers.connected && facebookEsquinagamers.renewal?.connected_at"
+                            class="mt-1 text-xs text-slate-500"
+                        >
+                            Conectado el {{ formatDate(facebookEsquinagamers.renewal.connected_at) }}
+                        </p>
+                        <p
                             v-if="facebookEsquinagamers.connected && facebookEsquinagamers.renewal"
                             class="mt-2 text-sm"
                             :class="renewalClass(facebookEsquinagamers.renewal)"
                         >
                             <template v-if="facebookEsquinagamers.renewal.source === 'oauth'">
-                                Renovar antes del {{ formatDate(facebookEsquinagamers.renewal.expires_at) }}
+                                <span v-if="facebookEsquinagamers.renewal.is_expired">Token vencido — vuelve a conectar</span>
+                                <span v-else>
+                                    Renovar antes del {{ formatDate(facebookEsquinagamers.renewal.expires_at) }}
+                                    <span v-if="facebookEsquinagamers.renewal.days_remaining !== null">
+                                        ({{ facebookEsquinagamers.renewal.days_remaining }} d)
+                                    </span>
+                                </span>
                             </template>
                             <template v-else>{{ facebookEsquinagamers.renewal.message }}</template>
                         </p>

@@ -30,7 +30,13 @@ Route::middleware('auth')->group(function () {
     Route::get('/scraper/news/{news}/preview', [ScraperController::class, 'preview'])->name('scraper.preview');
     Route::post('/scraper/news/{news}/regenerate-ai', [ScraperController::class, 'regenerateAi'])->name('scraper.regenerate-ai');
     Route::post('/scraper/sync-wordpress', [ScraperController::class, 'syncWordpressStatus'])->name('scraper.sync-wordpress');
+    Route::post('/scraper/attach-wordpress-featured-images', [ScraperController::class, 'attachWordpressFeaturedImages'])
+        ->name('scraper.attach-wordpress-featured-images');
     Route::post('/scraper/pipeline', [ScraperController::class, 'runPipeline'])->name('scraper.pipeline');
+    Route::get('/scraper/pipeline/status', [ScraperController::class, 'pipelineStatus'])->name('scraper.pipeline.status');
+    Route::post('/scraper/pipeline/dismiss', [ScraperController::class, 'dismissPipelineRun'])->name('scraper.pipeline.dismiss');
+    Route::get('/background-run/status', [ScraperController::class, 'pipelineStatus'])->name('background-run.status');
+    Route::post('/background-run/dismiss', [ScraperController::class, 'dismissPipelineRun'])->name('background-run.dismiss');
 
     Route::get('/articles', [WordpressArticleController::class, 'index'])->name('articles.index');
     Route::post('/articles/sync', [WordpressArticleController::class, 'sync'])->name('articles.sync');

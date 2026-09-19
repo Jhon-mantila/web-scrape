@@ -18,10 +18,18 @@ use App\SocialPublishing\Platforms\Facebook\FacebookVideoDeleter;
 use App\SocialPublishing\Platforms\Facebook\FacebookVideoMetadata;
 use App\SocialPublishing\Platforms\Facebook\FacebookVideoPermalink;
 use App\SocialPublishing\Support\VideoFileSize;
+use App\Http\Support\RequestsBackgroundJson;
+use App\ProcessScraping\Support\PipelineRunState;
+use App\ProcessScraping\Actions\ProcessBackgroundRunQueueAction;
+use App\SocialPublishing\Support\SocialPublishRunPlanner;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -179,65 +187,115 @@ class SocialVideoController extends Controller
 
     public function publishAll(
         SocialVideo $video,
-        PublishAllSocialPublicationsAction $action,
+        SocialPublishRunPlanner $planner,
         Request $request,
-    ): RedirectResponse {
-        $this->syncFromRequest($video, $request);
-
-        $validated = $request->validate([
-            'publication_ids' => 'sometimes|array',
-            'publication_ids.*' => 'integer',
-        ]);
-
-        $publicationIds = null;
-
-        if ($request->has('publication_ids')) {
-            $validIds = $video->publications()->pluck('id')->all();
-            $publicationIds = array_values(array_intersect(
-                $validated['publication_ids'] ?? [],
-                $validIds,
-            ));
-
-            if ($publicationIds === []) {
-                return back()->with('error', 'No seleccionaste ninguna plataforma para enviar.');
-            }
-        }
-
-        $summary = $action->execute($video->fresh(['publications']), $publicationIds);
-
-        $selected = $publicationIds !== null ? count($publicationIds) : $video->publications->count();
-        $message = "Envío ({$selected} seleccionada(s)): {$summary['published']} OK, {$summary['failed']} fallidas, {$summary['skipped']} omitidas.";
-
-        return back()->with(
-            $summary['failed'] > 0 ? 'error' : 'success',
-            $message,
-        );
+    ): JsonResponse|RedirectResponse {
+        return $this->startSocialPublishRun($request, $video, $planner, null);
     }
 
     public function publish(
         SocialVideo $video,
         SocialPublication $publication,
-        PublishSocialPublicationAction $action,
+        SocialPublishRunPlanner $planner,
         Request $request,
-    ): RedirectResponse {
+    ): JsonResponse|RedirectResponse {
         abort_unless($publication->social_video_id === $video->id, 404);
 
+        return $this->startSocialPublishRun($request, $video, $planner, [$publication->id]);
+    }
+
+    private function startSocialPublishRun(
+        Request $request,
+        SocialVideo $video,
+        SocialPublishRunPlanner $planner,
+        ?array $fixedPublicationIds,
+    ): JsonResponse|RedirectResponse {
+        $user = $request->user();
+
+        if ($user === null) {
+            abort(403);
+        }
+
+        $this->authorizeVideo($request, $video);
         $this->syncFromRequest($video, $request);
 
-        $action->execute($publication->fresh());
+        $publicationIds = $fixedPublicationIds;
 
-        $publication->refresh();
-        $message = match ($publication->status) {
-            PublicationStatus::Scheduled => 'Video programado.',
-            PublicationStatus::Published => 'Video publicado.',
-            PublicationStatus::Failed => $publication->last_error ?? 'Error al publicar.',
-            default => 'Publicación procesada.',
-        };
+        if ($publicationIds === null) {
+            $validated = $request->validate([
+                'publication_ids' => 'sometimes|array',
+                'publication_ids.*' => 'integer',
+            ]);
 
-        return back()->with(
-            $publication->status === PublicationStatus::Failed ? 'error' : 'success',
-            $message,
+            if ($request->has('publication_ids')) {
+                $validIds = $video->publications()->pluck('id')->all();
+                $publicationIds = array_values(array_intersect(
+                    $validated['publication_ids'] ?? [],
+                    $validIds,
+                ));
+
+                if ($publicationIds === []) {
+                    if (RequestsBackgroundJson::matches($request)) {
+                        return response()->json(['message' => 'No seleccionaste ninguna plataforma.'], 422);
+                    }
+
+                    return back()->with('error', 'No seleccionaste ninguna plataforma para enviar.');
+                }
+            }
+        }
+
+        $video->load('publications');
+        $steps = $planner->stepsForVideo($video, $publicationIds);
+
+        if ($steps === []) {
+            $message = 'No hay plataformas pendientes de envío.';
+
+            if (RequestsBackgroundJson::matches($request)) {
+                return response()->json(['message' => $message], 422);
+            }
+
+            return back()->with('error', $message);
+        }
+
+        $run = PipelineRunState::startSocialPublish(
+            $user->id,
+            $video->id,
+            $video->title,
+            $steps,
+            $publicationIds,
         );
+
+        $videoId = $video->id;
+
+        try {
+            Bus::dispatchAfterResponse(function () use ($user): void {
+                app(ProcessBackgroundRunQueueAction::class)->execute($user->id);
+            });
+        } catch (Throwable $dispatchError) {
+            PipelineRunState::fail($user->id, $dispatchError->getMessage(), $run['id'] ?? null);
+            Log::error('Social publish dispatch falló', ['message' => $dispatchError->getMessage()]);
+
+            if (RequestsBackgroundJson::matches($request)) {
+                return response()->json(['message' => $dispatchError->getMessage()], 500);
+            }
+
+            return back()->with('error', 'No se pudo iniciar la publicación en segundo plano.');
+        }
+
+        if (RequestsBackgroundJson::matches($request)) {
+            return response()->json([
+                'message' => ($run['status'] ?? '') === 'queued'
+                    ? 'Publicación en cola. Se enviará cuando termine el proceso anterior.'
+                    : 'Publicación iniciada en segundo plano.',
+                'run' => $run,
+                'snapshot' => PipelineRunState::snapshot($user->id),
+            ]);
+        }
+
+        return back()->with([
+            'success' => 'Publicación iniciada en segundo plano. Puedes navegar; el progreso aparece abajo a la derecha.',
+            'background_run_snapshot' => PipelineRunState::snapshot($user->id),
+        ]);
     }
 
     public function destroyOnFacebook(

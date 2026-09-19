@@ -11,7 +11,7 @@ class DownloadFeaturedImages extends Command
                             {--limit=20 : Cuántas noticias sin imagen procesar}
                             {--skip-generate : Solo scrape; no usar FLUX aunque COMFYUI_ENABLED=true}';
 
-    protected $description = 'Descarga imágenes destacadas del scrape (og:image/HTML); FLUX solo como fallback';
+    protected $description = 'Descarga imágenes destacadas del scrape (og:image/HTML); incluye rutas en BD sin archivo en disco; FLUX solo como fallback';
 
     public function handle(DownloadFeaturedImagesAction $action): int
     {

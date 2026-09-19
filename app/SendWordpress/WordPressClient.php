@@ -81,17 +81,33 @@ class WordPressClient
         return $response->json();
     }
 
+    public function updatePost(int $postId, array $data, ?WordPressAccount $account = null): array
+    {
+        $url = config('services.wordpress.url').'/wp-json/wp/v2/posts/'.$postId;
+
+        $response = $this->http($account)
+            ->timeout(60)
+            ->post($url, $data);
+
+        if ($response->failed()) {
+            throw new RuntimeException('Error actualizando post WordPress: '.$response->body());
+        }
+
+        return $response->json();
+    }
+
     /**
+     * @param  list<string>  $fields
      * @return array<string, mixed>
      */
-    public function getPost(int $postId, ?WordPressAccount $account = null): array
+    public function getPost(int $postId, ?WordPressAccount $account = null, array $fields = ['id', 'status', 'date', 'link', 'author']): array
     {
         $url = config('services.wordpress.url').'/wp-json/wp/v2/posts/'.$postId;
 
         $response = $this->http($account)
             ->timeout(30)
             ->get($url, [
-                '_fields' => 'id,status,date,link,author',
+                '_fields' => implode(',', $fields),
             ]);
 
         if ($response->failed()) {

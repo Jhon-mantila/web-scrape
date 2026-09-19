@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\ProcessScraping\Support\PipelineRunState;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -27,8 +28,15 @@ class HandleInertiaRequests extends Middleware
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
+                'backgroundRunSnapshot' => fn () => $request->session()->get('background_run_snapshot'),
             ],
             'platforms' => config('social.platforms'),
+            'backgroundRun' => fn () => $request->user()
+                ? PipelineRunState::snapshot($request->user()->id)
+                : null,
+            'pipelineRun' => fn () => $request->user()
+                ? PipelineRunState::snapshot($request->user()->id)
+                : null,
         ];
     }
 }
