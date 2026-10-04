@@ -2,6 +2,7 @@
 import { Link } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import SettingsSubnav from '@/Components/SettingsSubnav.vue';
 
 const props = defineProps({
     youtube: Object,
@@ -52,8 +53,10 @@ function linkedinDisconnectUrl(account) {
 
 <template>
     <AppLayout>
+        <SettingsSubnav />
+
         <div class="mb-8">
-            <h2 class="text-2xl font-semibold">Configuración</h2>
+            <h2 class="text-2xl font-semibold">Cuentas y OAuth</h2>
             <p class="mt-1 text-slate-400">Conecta tus cuentas de redes sociales.</p>
         </div>
 

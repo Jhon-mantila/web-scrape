@@ -1,13 +1,12 @@
-version: '3.8'
-
 services:
   laravel_app:
-    build: .
+    build:
+      context: .
+      network: host
     container_name: laravel_app
     dns:
       - 8.8.8.8
       - 1.1.1.1
-    user: "${UID}:${GID}"
     ports:
       - "8000:80"
     volumes:
@@ -18,9 +17,31 @@ services:
       - mysql_db
       - searxng
     environment:
+      APP_UID: ${APP_UID:-1000}
+      APP_GID: ${APP_GID:-1000}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama.host:11434}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       COMFYUI_URL: ${COMFYUI_URL:-http://comfyui.host:8188}
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        APP_UID="$${APP_UID:-1000}"
+        APP_GID="$${APP_GID:-1000}"
+        WEB_USER=laravel
+        mkdir -p storage/app/public/featured-images storage/framework/{cache,sessions,views} bootstrap/cache storage/logs
+        if ! getent group "$${WEB_USER}" >/dev/null 2>&1; then
+          groupadd -g "$${APP_GID}" "$${WEB_USER}" 2>/dev/null || groupadd "$${WEB_USER}"
+        fi
+        if ! id -u "$${WEB_USER}" >/dev/null 2>&1; then
+          useradd -u "$${APP_UID}" -g "$${WEB_USER}" -s /sbin/nologin "$${WEB_USER}" 2>/dev/null || useradd -g "$${WEB_USER}" -s /sbin/nologin "$${WEB_USER}"
+        fi
+        chown -R "$${WEB_USER}:$${WEB_USER}" storage bootstrap/cache
+        chmod -R ug+rwX storage/app/public/featured-images
+        export APACHE_RUN_USER="$${WEB_USER}"
+        export APACHE_RUN_GROUP="$${WEB_USER}"
+        exec apache2-foreground
     extra_hosts:
       - "host.docker.internal:host-gateway"
       - "ollama.host:${OLLAMA_HOST_IP:-172.31.193.25}"

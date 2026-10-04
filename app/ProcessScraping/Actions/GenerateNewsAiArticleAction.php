@@ -5,7 +5,9 @@ namespace App\ProcessScraping\Actions;
 use App\Models\News;
 use App\Models\NewsAiArticle;
 use App\ProcessScraping\Ai\AiArticleResponseParser;
-use App\ProcessScraping\Ai\OllamaClient;
+use App\ProcessScraping\Actions\DownloadFeaturedImagesAction;
+use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
+use App\ProcessScraping\Ai\Exceptions\AiProviderException;
 use App\ProcessScraping\Ai\OllamaModelSelector;
 use App\ProcessScraping\Prompts\ArticleGenerationPrompt;
 use App\ProcessScraping\Prompts\ArticleTypeClassifier;
@@ -18,7 +20,7 @@ use Throwable;
 class GenerateNewsAiArticleAction
 {
     public function __construct(
-        private readonly OllamaClient $ollama,
+        private readonly TextGenerationClient $llm,
         private readonly AiArticleResponseParser $parser,
         private readonly ArticleTypeClassifier $classifier,
         private readonly OllamaModelSelector $modelSelector,
@@ -40,6 +42,9 @@ class GenerateNewsAiArticleAction
         foreach ($items as $news) {
             $processed++;
             $detail = $news->detail;
+
+            app(DownloadFeaturedImagesAction::class)->ensureFeaturedImageReady($news);
+
             if ($detail === null || $detail->content_text === null) {
                 $failed++;
                 $news->update(['status_ia' => 'failed']);
@@ -84,7 +89,7 @@ class GenerateNewsAiArticleAction
                         $prompt .= "\n\nTu respuesta anterior no fue JSON válido o vino vacío. Responde SOLO con JSON puro con las claves title, excerpt y html. Sin ``` ni texto adicional.";
                     }
 
-                    $body = $this->ollama->generate(
+                    $body = $this->llm->generate(
                         ArticleGenerationPrompt::system($articleType),
                         $prompt,
                         $model,
@@ -157,6 +162,17 @@ class GenerateNewsAiArticleAction
 
                 $success++;
                 $successNewsIds[] = $news->id;
+            } catch (AiProviderException $e) {
+                $failed++;
+                $news->update(['status_ia' => 'failed']);
+                $message = $e->userMessage();
+                Log::warning('news_ai: fallo proveedor IA', [
+                    'news_id' => $news->id,
+                    'provider' => $e->provider,
+                    'kind' => $e->kind,
+                    'error' => $e->getMessage(),
+                ]);
+                $errors[] = ['news_id' => $news->id, 'message' => $message];
             } catch (Throwable $e) {
                 $failed++;
                 $news->update(['status_ia' => 'failed']);

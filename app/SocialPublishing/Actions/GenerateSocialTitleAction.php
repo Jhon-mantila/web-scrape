@@ -3,20 +3,21 @@
 namespace App\SocialPublishing\Actions;
 
 use App\Models\SocialVideo;
-use App\ProcessScraping\Ai\OllamaClient;
+use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
+use App\ProcessScraping\Ai\Support\AiSettings;
 use App\SocialPublishing\Prompts\SocialTitlePrompt;
 
 class GenerateSocialTitleAction
 {
     public function __construct(
-        private readonly OllamaClient $ollama,
+        private readonly TextGenerationClient $llm,
     ) {}
 
     public function execute(SocialVideo $video): SocialVideo
     {
-        $model = config('services.ollama.model');
+        $model = AiSettings::defaultModel();
 
-        $raw = $this->ollama->generate(
+        $raw = $this->llm->generate(
             SocialTitlePrompt::system(),
             SocialTitlePrompt::user($video->title, $video->notes),
             $model,

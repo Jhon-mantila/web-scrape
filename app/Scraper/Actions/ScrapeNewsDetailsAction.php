@@ -4,12 +4,16 @@ namespace App\Scraper\Actions;
 
 use App\Models\News;
 use App\Models\NewsDetail;
+use App\ProcessScraping\Actions\DownloadFeaturedImagesAction;
 use App\Scraper\Sources\Details\DetailScraperFactory;
 use Illuminate\Support\Facades\Log;
 
 class ScrapeNewsDetailsAction
 {
-    public function __construct(private readonly ?DetailScraperFactory $factory = null) {}
+    public function __construct(
+        private readonly ?DetailScraperFactory $factory = null,
+        private readonly ?DownloadFeaturedImagesAction $downloadImages = null,
+    ) {}
 
     /**
      * @return array{processed:int, success:int, failed:int}
@@ -40,6 +44,9 @@ class ScrapeNewsDetailsAction
                 ]);
 
                 $summary['success']++;
+
+                $news->refresh()->load('detail');
+                $this->downloadImages()->downloadForNews($news);
             } catch (\Throwable $e) {
                 $detail->update([
                     'status' => 'failed',
@@ -62,16 +69,15 @@ class ScrapeNewsDetailsAction
 
     private function getCandidates(int $limit, bool $force)
     {
-        $query = News::query()->latest('id');
-
         if ($force) {
-            return $query->limit($limit)->get();
+            return News::query()->latest('id')->limit($limit)->get();
         }
 
-        return $query
+        return News::query()
             ->whereDoesntHave('detail', function ($q) {
                 $q->where('status', 'processed');
             })
+            ->orderBy('id')
             ->limit($limit)
             ->get();
     }
@@ -79,5 +85,10 @@ class ScrapeNewsDetailsAction
     private function factory(): DetailScraperFactory
     {
         return $this->factory ?? new DetailScraperFactory();
+    }
+
+    private function downloadImages(): DownloadFeaturedImagesAction
+    {
+        return $this->downloadImages ?? app(DownloadFeaturedImagesAction::class);
     }
 }

@@ -2,16 +2,19 @@
 
 namespace App\ProcessScraping\Ai;
 
+use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
+use App\ProcessScraping\Ai\Support\AiHttpErrorMapper;
+use App\ProcessScraping\Ai\Support\AiSettings;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
-class OllamaClient
+class OllamaClient implements TextGenerationClient
 {
     public function generate(string $system, string $prompt, ?string $model = null): string
     {
         $url = rtrim(config('services.ollama.url'), '/').'/api/generate';
-        $model ??= config('services.ollama.model');
+        $model ??= AiSettings::defaultModel();
 
         $payload = [
             'model' => $model,
@@ -20,7 +23,7 @@ class OllamaClient
             'stream' => false,
         ];
 
-        if (config('services.ollama.format_json')) {
+        if (AiSettings::formatJson()) {
             $payload['format'] = 'json';
         }
 
@@ -29,9 +32,9 @@ class OllamaClient
         }
 
         $options = array_filter([
-            'temperature' => (float) config('services.ollama.temperature'),
+            'temperature' => AiSettings::temperature(),
             'num_ctx' => (int) config('services.ollama.num_ctx'),
-            'num_predict' => (int) config('services.ollama.num_predict'),
+            'num_predict' => AiSettings::maxTokens(),
         ], fn ($value) => $value !== null && $value !== 0 && $value !== '');
 
         if ($options !== []) {
@@ -39,22 +42,21 @@ class OllamaClient
         }
 
         try {
-            $response = Http::timeout((int) config('services.ollama.timeout'))
+            $response = Http::timeout(AiSettings::timeout())
                 ->connectTimeout(15)
                 ->acceptJson()
                 ->post($url, $payload);
         } catch (\Illuminate\Http\Client\ConnectionException $e) {
-            throw new RuntimeException(
-                'No se pudo conectar con Ollama en '.$url.': '.$e->getMessage(),
-                0,
-                $e
-            );
+            throw AiHttpErrorMapper::connection('ollama_local', $url, $e->getMessage());
         }
 
         if ($response->failed()) {
-            $body = $response->body();
-            $snippet = $body !== '' ? ' Respuesta: '.mb_substr($body, 0, 500) : '';
-            throw new RuntimeException('Ollama HTTP '.$response->status().' en '.$url.'.'.$snippet);
+            throw AiHttpErrorMapper::fromResponse(
+                'ollama_local',
+                $response->status(),
+                $response->body(),
+                $url,
+            );
         }
 
         return (string) ($response->json('response') ?? '');
@@ -89,5 +91,10 @@ class OllamaClient
         }
 
         Log::info('ollama: modelos descargados de RAM (listo para ComfyUI)');
+    }
+
+    public function supportsModelUnload(): bool
+    {
+        return true;
     }
 }

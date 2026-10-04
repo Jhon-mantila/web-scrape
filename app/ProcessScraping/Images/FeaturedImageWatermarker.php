@@ -9,6 +9,14 @@ use Throwable;
 
 class FeaturedImageWatermarker
 {
+    public static function canProcess(): bool
+    {
+        return \function_exists('imagecreatetruecolor')
+            && \function_exists('imagecreatefromjpeg')
+            && \function_exists('imagejpeg')
+            && (\function_exists('imagewebp') || \function_exists('imagepng'));
+    }
+
     /**
      * Aplica marca de agua y normaliza el formato de salida (webp por defecto).
      *
@@ -16,6 +24,10 @@ class FeaturedImageWatermarker
      */
     public function apply(string $relativePath): ?string
     {
+        if (! self::canProcess()) {
+            return $relativePath;
+        }
+
         if (! config('services.featured_image.watermark_enabled')) {
             return $this->normalizeOnly($relativePath);
         }
@@ -237,7 +249,15 @@ class FeaturedImageWatermarker
         $finalRelativePath = $this->outputPathFor($relativePath, $format);
         $saved = $this->saveImage($image, $disk->path($finalRelativePath), $format);
 
-        if (! $saved) {
+        if (! $saved || ! $disk->exists($finalRelativePath)) {
+            return null;
+        }
+
+        $fullFinal = $disk->path($finalRelativePath);
+
+        if (@\filesize($fullFinal) < 512 || @\getimagesize($fullFinal) === false) {
+            $disk->delete($finalRelativePath);
+
             return null;
         }
 

@@ -4,7 +4,7 @@ namespace App\SocialPublishing\Actions;
 
 use App\Models\SocialPublication;
 use App\Models\SocialVideo;
-use App\ProcessScraping\Ai\OllamaClient;
+use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
 use App\SocialPublishing\Enums\Platform;
 use App\SocialPublishing\Enums\PublicationStatus;
 use App\SocialPublishing\Prompts\SocialCaptionPrompt;
@@ -12,7 +12,7 @@ use App\SocialPublishing\Prompts\SocialCaptionPrompt;
 class GenerateSocialCaptionsAction
 {
     public function __construct(
-        private readonly OllamaClient $ollama,
+        private readonly TextGenerationClient $llm,
     ) {}
 
     /**
@@ -41,7 +41,7 @@ class GenerateSocialCaptionsAction
 
             $model = config("social.platforms.{$platformKey}.caption.model");
 
-            $raw = $this->ollama->generate(
+            $raw = $this->llm->generate(
                 SocialCaptionPrompt::system($platform),
                 SocialCaptionPrompt::user($video->title, $platform, $video->notes),
                 $model,

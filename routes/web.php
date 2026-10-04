@@ -5,6 +5,7 @@ use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FacebookOAuthController;
 use App\Http\Controllers\LinkedInOAuthController;
+use App\Http\Controllers\ScheduledTasksController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SocialVideoController;
 use App\Http\Controllers\ScraperController;
@@ -32,6 +33,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/scraper/sync-wordpress', [ScraperController::class, 'syncWordpressStatus'])->name('scraper.sync-wordpress');
     Route::post('/scraper/attach-wordpress-featured-images', [ScraperController::class, 'attachWordpressFeaturedImages'])
         ->name('scraper.attach-wordpress-featured-images');
+    Route::post('/scraper/download-featured-images', [ScraperController::class, 'downloadFeaturedImages'])
+        ->name('scraper.download-featured-images');
     Route::post('/scraper/pipeline', [ScraperController::class, 'runPipeline'])->name('scraper.pipeline');
     Route::get('/scraper/pipeline/status', [ScraperController::class, 'pipelineStatus'])->name('scraper.pipeline.status');
     Route::post('/scraper/pipeline/dismiss', [ScraperController::class, 'dismissPipelineRun'])->name('scraper.pipeline.dismiss');
@@ -49,6 +52,13 @@ Route::middleware('auth')->group(function () {
         ->name('articles.publications.facebook.destroy');
 
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
+    Route::get('/settings/scheduler', [ScheduledTasksController::class, 'index'])->name('settings.scheduler.index');
+    Route::put('/settings/scheduler/{taskKey}', [ScheduledTasksController::class, 'update'])
+        ->where('taskKey', '[a-z0-9_]+')
+        ->name('settings.scheduler.update');
+    Route::post('/settings/scheduler/{taskKey}/run-now', [ScheduledTasksController::class, 'runNow'])
+        ->where('taskKey', '[a-z0-9_]+')
+        ->name('settings.scheduler.run-now');
 
     Route::get('/auth/youtube/redirect', [YouTubeOAuthController::class, 'redirect'])->name('youtube.oauth.redirect');
     Route::get('/auth/youtube/callback', [YouTubeOAuthController::class, 'callback'])->name('youtube.oauth.callback');

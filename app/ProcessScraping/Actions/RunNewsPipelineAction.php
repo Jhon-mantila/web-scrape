@@ -2,9 +2,11 @@
 
 namespace App\ProcessScraping\Actions;
 
+use App\Models\News;
 use App\Scraper\Actions\ScrapeNewsAction;
 use App\Scraper\Actions\ScrapeNewsDetailsAction;
-use App\ProcessScraping\Ai\OllamaClient;
+use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
+use App\ProcessScraping\Ai\Support\AiSettings;
 use App\ProcessScraping\Images\Generators\ComfyUIClient;
 use App\ProcessScraping\Support\PipelineBatchResolver;
 use App\ProcessScraping\Support\PipelineRunState;
@@ -20,7 +22,7 @@ class RunNewsPipelineAction
         private readonly GenerateNewsAiArticleAction $generateAi,
         private readonly SendPostToWordpressAction $sendWordpress,
         private readonly ComfyUIClient $comfyui,
-        private readonly OllamaClient $ollama,
+        private readonly TextGenerationClient $llm,
         private readonly PipelineBatchResolver $batchResolver,
     ) {}
 
@@ -69,9 +71,12 @@ class RunNewsPipelineAction
             "Detalles OK {$details['success']}/{$details['processed']}",
         );
 
+        $batchIds = $this->batchResolver->resolveForAi($limit, $force);
+
         $this->progressBegin($progressUserId, 'images', 'Descargando imágenes destacadas…');
         $stepStarted = microtime(true);
-        $images = $this->downloadImages->execute($limit, $skipGenerate);
+        $images = $this->downloadImages->execute($limit, $skipGenerate, $batchIds);
+        $this->downloadImages->ensureBatchReady($batchIds, $skipGenerate);
         $timings['images'] = microtime(true) - $stepStarted;
         $this->progressFinish(
             $progressUserId,
@@ -86,8 +91,6 @@ class RunNewsPipelineAction
         ) {
             $this->comfyui->freeMemory();
         }
-
-        $batchIds = $this->batchResolver->resolveForAi($limit, $force);
 
         if ($skipResearch) {
             $research = ['processed' => 0, 'success' => 0, 'skipped' => 0, 'failed' => 0];
@@ -114,8 +117,8 @@ class RunNewsPipelineAction
             "IA OK {$ai['success']}/{$ai['processed']}",
         );
 
-        if (config('services.ollama.unload_after_generate') && $ai['processed'] > 0) {
-            $this->ollama->unloadModels();
+        if (AiSettings::shouldUnloadAfterGenerate() && $this->llm->supportsModelUnload() && $ai['processed'] > 0) {
+            $this->llm->unloadModels();
         }
 
         if ($skipWordpress) {
@@ -128,6 +131,8 @@ class RunNewsPipelineAction
             ];
             $this->progressSkip($progressUserId, 'wordpress');
         } else {
+            $this->downloadImages->ensureBatchReady($ai['news_ids'] ?? [], $skipGenerate);
+
             $this->progressBegin($progressUserId, 'wordpress', 'Enviando a WordPress…');
             $stepStarted = microtime(true);
             $wordpress = $this->sendWordpress->execute(

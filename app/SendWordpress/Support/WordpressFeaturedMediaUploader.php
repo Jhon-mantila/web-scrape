@@ -19,22 +19,13 @@ class WordpressFeaturedMediaUploader
 
     public function uploadForArticle(NewsAiArticle $article, WordPressAccount $account): ?int
     {
-        $article->loadMissing('news.detail');
-        $imagePath = $article->news->detail?->featured_image_path;
-        $resolvedPath = $this->downloadImages->resolveExistingStoragePath($imagePath);
-
-        if ($resolvedPath === null && $article->news !== null) {
-            $this->downloadImages->downloadForNews($article->news);
-            $article->load('news.detail');
-            $imagePath = $article->news->detail?->featured_image_path;
-            $resolvedPath = $this->downloadImages->resolveExistingStoragePath($imagePath);
-        }
+        $resolvedPath = $this->resolveLocalFeaturedPath($article);
 
         if ($resolvedPath === null) {
             Log::info('wordpress: sin imagen destacada local para el artículo', [
                 'news_ai_id' => $article->id,
                 'news_id' => $article->news_id,
-                'stored_path' => $imagePath,
+                'stored_path' => $article->news->detail?->featured_image_path,
             ]);
 
             return null;
@@ -69,5 +60,22 @@ class WordpressFeaturedMediaUploader
 
             return null;
         }
+    }
+
+    public function resolveLocalFeaturedPath(NewsAiArticle $article): ?string
+    {
+        $article->loadMissing('news.detail');
+
+        if ($article->news === null) {
+            return null;
+        }
+
+        $resolvedPath = $this->downloadImages->ensureFeaturedImageReady($article->news);
+
+        if ($resolvedPath !== null) {
+            return $resolvedPath;
+        }
+
+        return $this->downloadImages->syncFeaturedImagePathFromDisk($article->news);
     }
 }

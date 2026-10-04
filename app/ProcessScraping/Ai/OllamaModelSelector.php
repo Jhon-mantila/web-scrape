@@ -3,19 +3,20 @@
 namespace App\ProcessScraping\Ai;
 
 use App\Models\News;
+use App\ProcessScraping\Ai\Support\AiSettings;
 
 class OllamaModelSelector
 {
     public function forNews(News $news, string $contentText): string
     {
-        $premium = config('services.ollama.model_premium');
-        $default = config('services.ollama.model');
+        $premium = AiSettings::premiumModel();
+        $default = AiSettings::defaultModel();
 
-        if ($premium === null || $premium === '') {
+        if ($premium === null) {
             return $default;
         }
 
-        $minLength = (int) config('services.ollama.premium_min_chars', 4500);
+        $minLength = AiSettings::premiumMinChars();
 
         if ($news->source === 'anime_news' && mb_strlen($contentText) >= $minLength) {
             return $premium;

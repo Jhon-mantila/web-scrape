@@ -15,6 +15,7 @@ class SocialPublication extends Model
         'caption_generated',
         'caption_edited',
         'scheduled_at',
+        'queued_publish_at',
         'published_at',
         'external_id',
         'external_url',
@@ -24,6 +25,7 @@ class SocialPublication extends Model
 
     protected $casts = [
         'scheduled_at' => 'datetime',
+        'queued_publish_at' => 'datetime',
         'published_at' => 'datetime',
         'api_response' => 'array',
         'status' => PublicationStatus::class,
@@ -61,6 +63,7 @@ class SocialPublication extends Model
         return in_array($this->status, [
             PublicationStatus::Draft,
             PublicationStatus::CaptionReady,
+            PublicationStatus::Queued,
             PublicationStatus::Unavailable,
         ], true);
     }

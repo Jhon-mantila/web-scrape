@@ -76,8 +76,16 @@ const pipelineForm = useForm({
 const syncWpForm = useForm({});
 const attachFeaturedForm = useForm({
     limit: 50,
+    all: false,
     force: false,
 });
+
+const downloadImagesForm = useForm({
+    limit: 20,
+    skip_generate: true,
+});
+
+const downloadingNewsId = ref(null);
 
 const statCards = computed(() => [
     { key: 'total_news', label: 'Noticias', value: props.stats.total_news, class: 'text-white' },
@@ -434,9 +442,13 @@ function syncWordpressStatus() {
 }
 
 function attachWordpressFeaturedImages() {
+    const scope = attachFeaturedForm.all
+        ? 'todos los posts enviados a WordPress (--all)'
+        : `hasta ${attachFeaturedForm.limit} posts`;
+
     if (
         !window.confirm(
-            '¿Subir imágenes locales y asignarlas como destacada en posts WordPress ya enviados? Solo entradas sin imagen destacada en WP (salvo que marques forzar).',
+            `¿Subir imágenes locales y asignarlas como destacada en ${scope}? Solo entradas sin imagen destacada en WP (salvo que marques forzar).`,
         )
     ) {
         return;
@@ -445,6 +457,36 @@ function attachWordpressFeaturedImages() {
     attachFeaturedForm.post(route('scraper.attach-wordpress-featured-images'), {
         preserveScroll: true,
     });
+}
+
+function downloadFeaturedImagesBatch() {
+    downloadImagesForm
+        .transform((data) => ({ ...data, news_id: null }))
+        .post(route('scraper.download-featured-images'), {
+            preserveScroll: true,
+        });
+}
+
+function downloadFeaturedImageForNews(newsId) {
+    if (downloadingNewsId.value !== null) {
+        return;
+    }
+
+    downloadingNewsId.value = newsId;
+
+    router.post(
+        route('scraper.download-featured-images'),
+        {
+            news_id: newsId,
+            skip_generate: true,
+        },
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                downloadingNewsId.value = null;
+            },
+        },
+    );
 }
 
 function wpStatusLabel(status) {
@@ -635,6 +677,55 @@ function closePreview() {
             <section class="mb-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
                 <div class="flex flex-wrap items-start justify-between gap-3">
                     <div>
+                        <h3 class="text-sm font-medium text-slate-200">Imágenes destacadas (local)</h3>
+                        <p class="mt-1 text-xs text-slate-500">
+                            Si el pipeline no guardó la miniatura, descarga desde ANN sin pasar por IA.
+                            Equivalente a
+                            <code class="text-slate-400">php artisan news:download-images</code>.
+                        </p>
+                    </div>
+                    <div class="flex flex-wrap items-end gap-2">
+                        <label class="text-xs text-slate-400">
+                            Límite
+                            <input
+                                v-model.number="downloadImagesForm.limit"
+                                type="number"
+                                min="1"
+                                max="200"
+                                class="ml-1 w-16 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-white"
+                            />
+                        </label>
+                        <label class="flex items-center gap-1.5 text-xs text-slate-400">
+                            <input
+                                v-model="downloadImagesForm.skip_generate"
+                                type="checkbox"
+                                class="rounded border-slate-600"
+                            />
+                            Sin FLUX
+                        </label>
+                        <button
+                            type="button"
+                            class="rounded-lg border border-emerald-600/60 px-3 py-1.5 text-sm text-emerald-200 hover:bg-emerald-950/40 disabled:opacity-50"
+                            :disabled="downloadImagesForm.processing"
+                            @click="downloadFeaturedImagesBatch"
+                        >
+                            {{
+                                downloadImagesForm.processing
+                                    ? 'Descargando…'
+                                    : 'Descargar imágenes'
+                            }}
+                        </button>
+                    </div>
+                </div>
+                <p class="mt-2 text-xs text-slate-600">
+                    Por noticia: usa «Descargar imagen» en la fila (como
+                    <code class="text-slate-500">news:download-images --limit=1</code>).
+                </p>
+            </section>
+
+            <section class="mb-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div>
                         <h3 class="text-sm font-medium text-slate-200">Programación en Esquina Anime</h3>
                         <p class="mt-1 text-xs text-slate-500">
                             Estado guardado en BD al enviar. Usa sincronizar para actualizar si ya publicaron en WP.
@@ -649,6 +740,35 @@ function closePreview() {
                         >
                             {{ syncWpForm.processing ? 'Sincronizando…' : 'Sincronizar estado WP' }}
                         </button>
+                        <label class="flex items-center gap-1.5 text-xs text-slate-400">
+                            <input
+                                v-model="attachFeaturedForm.all"
+                                type="checkbox"
+                                class="rounded border-slate-600"
+                            />
+                            Todos (--all)
+                        </label>
+                        <label
+                            v-if="!attachFeaturedForm.all"
+                            class="text-xs text-slate-400"
+                        >
+                            Límite
+                            <input
+                                v-model.number="attachFeaturedForm.limit"
+                                type="number"
+                                min="1"
+                                max="500"
+                                class="ml-1 w-16 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-white"
+                            />
+                        </label>
+                        <label class="flex items-center gap-1.5 text-xs text-slate-400">
+                            <input
+                                v-model="attachFeaturedForm.force"
+                                type="checkbox"
+                                class="rounded border-slate-600"
+                            />
+                            Forzar
+                        </label>
                         <button
                             type="button"
                             class="rounded-lg border border-violet-600/60 px-3 py-1.5 text-sm text-violet-200 hover:bg-violet-950/40 disabled:opacity-50"
@@ -664,7 +784,6 @@ function closePreview() {
                     </div>
                 </div>
                 <p class="mt-2 text-xs text-slate-600">
-                    Adjuntar destacadas: hasta {{ attachFeaturedForm.limit }} posts sin imagen en WP.
                     CLI:
                     <code class="text-slate-500">news:attach-wordpress-featured-images --all</code>
                 </p>
@@ -1006,6 +1125,20 @@ function closePreview() {
                             >
                                 Ver fuente original
                             </a>
+
+                            <button
+                                v-if="item.detail?.status === 'processed' && !item.detail?.has_image"
+                                type="button"
+                                class="mt-2 rounded-md border border-emerald-700/60 px-2 py-0.5 text-xs text-emerald-200 hover:bg-emerald-950/40 disabled:opacity-50"
+                                :disabled="downloadingNewsId === item.id"
+                                @click="downloadFeaturedImageForNews(item.id)"
+                            >
+                                {{
+                                    downloadingNewsId === item.id
+                                        ? 'Descargando…'
+                                        : 'Descargar imagen'
+                                }}
+                            </button>
 
                             <div class="mt-3 flex flex-wrap gap-1.5">
                                 <span

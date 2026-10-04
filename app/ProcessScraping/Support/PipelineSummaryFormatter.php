@@ -33,6 +33,11 @@ class PipelineSummaryFormatter
 
         if (($summary['ai']['failed'] ?? 0) > 0) {
             $parts[] = 'IA fallidas: '.$summary['ai']['failed'];
+            $firstError = $summary['ai']['errors'][0]['message'] ?? null;
+
+            if (is_string($firstError) && $firstError !== '') {
+                $parts[] = mb_substr($firstError, 0, 220);
+            }
         }
 
         return 'Pipeline: '.implode(' · ', $parts);

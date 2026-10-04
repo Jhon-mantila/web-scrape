@@ -23,6 +23,10 @@ class FeaturedImageExtractor
         $baseUrl = $news->url;
         $candidates = [];
 
+        if ($news->image !== null && $news->image !== '') {
+            $candidates[] = $this->toAbsoluteUrl($news->image, $baseUrl);
+        }
+
         $detail = $news->detail;
 
         if ($detail?->raw_html !== null && $detail->raw_html !== '') {
@@ -35,17 +39,29 @@ class FeaturedImageExtractor
             }
         }
 
-        if ($news->image !== null && $news->image !== '') {
-            $candidates[] = $this->toAbsoluteUrl($news->image, $baseUrl);
+        if ($candidates === [] && $news->url !== null && $news->url !== '') {
+            $fromPage = $this->extractFromFullPage($news->url);
+
+            if ($fromPage !== null) {
+                $candidates[] = $fromPage;
+            }
+        }
+
+        return $this->uniqueUrls($candidates);
+    }
+
+    /**
+     * Último recurso cuando raw_html no tenía URLs útiles.
+     */
+    public function collectCandidatesFromLivePage(News $news): array
+    {
+        if ($news->url === null || $news->url === '') {
+            return [];
         }
 
         $fromPage = $this->extractFromFullPage($news->url);
 
-        if ($fromPage !== null) {
-            $candidates[] = $fromPage;
-        }
-
-        return $this->uniqueUrls($candidates);
+        return $fromPage !== null ? [$fromPage] : [];
     }
 
     private function extractFromFullPage(string $pageUrl): ?string

@@ -124,6 +124,7 @@ class SocialVideoController extends Controller
             'publications.*.id' => 'required|integer|exists:social_publications,id',
             'publications.*.caption_edited' => 'nullable|string|max:10000',
             'publications.*.scheduled_at' => 'nullable|date',
+            'publications.*.queued_publish_at' => 'nullable|date',
         ]);
 
         $updates = [];
@@ -146,13 +147,16 @@ class SocialVideoController extends Controller
 
         if (isset($validated['publications'])) {
             foreach ($validated['publications'] as $row) {
-                SocialPublication::query()
+                $publication = SocialPublication::query()
                     ->where('social_video_id', $video->id)
                     ->where('id', $row['id'])
-                    ->update([
-                        'caption_edited' => $row['caption_edited'] ?? null,
-                        'scheduled_at' => $this->normalizeScheduledAt($row['scheduled_at'] ?? null),
-                    ]);
+                    ->first();
+
+                if ($publication === null) {
+                    continue;
+                }
+
+                $this->applyPublicationFormRow($publication, $row);
             }
         }
 
@@ -245,6 +249,24 @@ class SocialVideoController extends Controller
         }
 
         $video->load('publications');
+
+        $blockedByQueue = $video->publications
+            ->filter(fn (SocialPublication $p) => $publicationIds === null
+                || in_array($p->id, $publicationIds, true))
+            ->filter(fn (SocialPublication $p) => $p->queued_publish_at?->isFuture())
+            ->values();
+
+        if ($blockedByQueue->isNotEmpty()) {
+            $labels = $blockedByQueue->map(fn (SocialPublication $p) => $p->platformLabel())->implode(', ');
+            $message = "Hay envío programado en la app para: {$labels}. Borra la fecha «Enviar automáticamente» o espera a que se ejecute la cola.";
+
+            if (RequestsBackgroundJson::matches($request)) {
+                return response()->json(['message' => $message], 422);
+            }
+
+            return back()->with('error', $message);
+        }
+
         $steps = $planner->stepsForVideo($video, $publicationIds);
 
         if ($steps === []) {
@@ -449,6 +471,7 @@ class SocialVideoController extends Controller
                 'caption_edited' => $p->caption_edited,
                 'caption' => $p->caption(),
                 'scheduled_at' => $p->scheduled_at?->toIso8601String(),
+                'queued_publish_at' => $p->queued_publish_at?->toIso8601String(),
                 'published_at' => $p->published_at?->toIso8601String(),
                 'external_id' => $p->external_id,
                 'external_url' => $this->publicPublicationUrl($p),
@@ -578,14 +601,52 @@ class SocialVideoController extends Controller
                 continue;
             }
 
-            SocialPublication::query()
+            $publication = SocialPublication::query()
                 ->where('social_video_id', $video->id)
                 ->where('id', $row['id'])
-                ->update([
-                    'caption_edited' => $row['caption_edited'] ?? null,
-                    'scheduled_at' => $this->normalizeScheduledAt($row['scheduled_at'] ?? null),
-                ]);
+                ->first();
+
+            if ($publication === null) {
+                continue;
+            }
+
+            $this->applyPublicationFormRow($publication, $row);
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function applyPublicationFormRow(SocialPublication $publication, array $row): void
+    {
+        if (in_array($publication->status, [PublicationStatus::Published, PublicationStatus::Scheduled, PublicationStatus::Publishing], true)) {
+            $publication->update([
+                'caption_edited' => $row['caption_edited'] ?? null,
+            ]);
+
+            return;
+        }
+
+        $queuedAt = $this->normalizeScheduledAt($row['queued_publish_at'] ?? null);
+        $queuedCarbon = $queuedAt !== null ? \Illuminate\Support\Carbon::parse($queuedAt, config('app.timezone')) : null;
+
+        $status = $publication->status;
+
+        if ($queuedCarbon !== null && $queuedCarbon->isFuture()) {
+            $status = PublicationStatus::Queued;
+        } elseif ($status === PublicationStatus::Queued) {
+            $status = filled($publication->caption_edited ?? $publication->caption_generated)
+                ? PublicationStatus::CaptionReady
+                : PublicationStatus::Draft;
+        }
+
+        $publication->update([
+            'caption_edited' => $row['caption_edited'] ?? null,
+            'scheduled_at' => $this->normalizeScheduledAt($row['scheduled_at'] ?? null),
+            'queued_publish_at' => $queuedAt,
+            'status' => $status,
+            'last_error' => $status === PublicationStatus::Queued ? null : $publication->last_error,
+        ]);
     }
 
     private function authorizeVideo(Request $request, SocialVideo $video): void

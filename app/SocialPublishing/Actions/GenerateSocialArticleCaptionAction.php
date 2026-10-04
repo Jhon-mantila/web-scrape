@@ -3,14 +3,14 @@
 namespace App\SocialPublishing\Actions;
 
 use App\Models\WordpressPost;
-use App\ProcessScraping\Ai\OllamaClient;
+use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
 use App\SocialPublishing\Enums\Platform;
 use App\SocialPublishing\Prompts\SocialArticleCaptionPrompt;
 
 class GenerateSocialArticleCaptionAction
 {
     public function __construct(
-        private readonly OllamaClient $ollama,
+        private readonly TextGenerationClient $llm,
     ) {}
 
     /**
@@ -37,7 +37,7 @@ class GenerateSocialArticleCaptionAction
         $platform = Platform::from($platformKey);
         $model = config("social.platforms.{$platformKey}.caption.model");
 
-        $raw = $this->ollama->generate(
+        $raw = $this->llm->generate(
             SocialArticleCaptionPrompt::system($platform),
             SocialArticleCaptionPrompt::user(
                 $post->title,

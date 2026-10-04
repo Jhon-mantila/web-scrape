@@ -19,6 +19,7 @@ const form = useForm({
         id: p.id,
         caption_edited: p.caption_edited || p.caption_generated || '',
         scheduled_at: p.scheduled_at ? p.scheduled_at.slice(0, 16) : '',
+        queued_publish_at: p.queued_publish_at ? p.queued_publish_at.slice(0, 16) : '',
     })),
 });
 
@@ -41,7 +42,15 @@ const selectedPublishableCount = computed(() =>
 );
 
 function isPublishable(pub) {
-    return !pub.coming_soon && pub.status !== 'published' && pub.status !== 'scheduled';
+    if (pub.coming_soon || pub.status === 'published' || pub.status === 'scheduled') {
+        return false;
+    }
+
+    if (pub.queued_publish_at && new Date(pub.queued_publish_at) > new Date()) {
+        return false;
+    }
+
+    return true;
 }
 
 function syncPublicationSelection() {
@@ -89,7 +98,7 @@ function linkedInObservations(pub) {
     const items = [];
 
     if (hints.scheduling === false) {
-        items.push('No se puede programar: LinkedIn publica de inmediato.');
+        items.push('LinkedIn no tiene planificador en su API; usa «Enviar automáticamente (Esquina AI)».');
     }
 
     if (hints.thumbnail === false) {
@@ -122,6 +131,7 @@ watch(
             id: p.id,
             caption_edited: p.caption_edited || p.caption_generated || '',
             scheduled_at: p.scheduled_at ? p.scheduled_at.slice(0, 16) : '',
+            queued_publish_at: p.queued_publish_at ? p.queued_publish_at.slice(0, 16) : '',
         }));
         syncPublicationSelection();
     },
@@ -532,12 +542,13 @@ function openSchedulePicker(event) {
                     />
 
                     <div class="mt-3 grid gap-3 sm:grid-cols-2">
-                        <div v-if="!isLinkedIn(pub.platform)" class="schedule-datetime-group">
+                        <div class="schedule-datetime-group">
                             <label
                                 :for="`schedule-${pub.id}`"
                                 class="mb-1.5 block text-xs font-medium text-slate-400"
                             >
                                 Programar publicación
+                                <span v-if="isLinkedIn(pub.platform)" class="text-slate-600"> (no aplica)</span>
                             </label>
                             <div class="schedule-datetime-wrap">
                                 <input
@@ -545,12 +556,13 @@ function openSchedulePicker(event) {
                                     v-model="form.publications[index].scheduled_at"
                                     type="datetime-local"
                                     class="schedule-datetime-input"
-                                    :disabled="pub.coming_soon"
+                                    :disabled="pub.coming_soon || isLinkedIn(pub.platform)"
+                                    :title="isLinkedIn(pub.platform) ? 'LinkedIn no tiene planificador en la API' : ''"
                                 />
                                 <button
                                     type="button"
                                     class="schedule-datetime-trigger"
-                                    :disabled="pub.coming_soon"
+                                    :disabled="pub.coming_soon || isLinkedIn(pub.platform)"
                                     aria-label="Abrir calendario"
                                     @click="openSchedulePicker"
                                 >
@@ -569,11 +581,58 @@ function openSchedulePicker(event) {
                                 </button>
                             </div>
                             <p class="mt-1.5 text-xs text-slate-500">
-                                Meta publicará en la página a esa hora.
+                                <template v-if="isLinkedIn(pub.platform)">
+                                    Usa el campo de la derecha para programar el envío.
+                                </template>
+                                <template v-else>
+                                    YouTube / Facebook: la red publica a esa hora al enviar.
+                                </template>
                             </p>
                         </div>
-                        <div v-else class="rounded-lg border border-slate-700/80 bg-slate-950/80 px-3 py-2">
-                            <p class="mb-1 text-xs font-medium text-slate-400">Observaciones LinkedIn</p>
+                        <div class="schedule-datetime-group">
+                            <label
+                                :for="`queue-${pub.id}`"
+                                class="mb-1.5 block text-xs font-medium text-slate-300"
+                            >
+                                Enviar automáticamente (app)
+                            </label>
+                            <div class="schedule-datetime-wrap">
+                                <input
+                                    :id="`queue-${pub.id}`"
+                                    v-model="form.publications[index].queued_publish_at"
+                                    type="datetime-local"
+                                    class="schedule-datetime-input ring-1 ring-sky-800/40"
+                                    :disabled="pub.coming_soon"
+                                />
+                                <button
+                                    type="button"
+                                    class="schedule-datetime-trigger"
+                                    :disabled="pub.coming_soon"
+                                    aria-label="Abrir calendario cola app"
+                                    @click="openSchedulePicker"
+                                >
+                                    <svg
+                                        class="schedule-datetime-icon"
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="1.75"
+                                        aria-hidden="true"
+                                    >
+                                        <rect x="3" y="4" width="18" height="18" rx="2" />
+                                        <path d="M16 2v4M8 2v4M3 10h18" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <p class="mt-1.5 text-xs text-slate-500">
+                                Todas las redes (incl. LinkedIn). Guarda cambios y activa el planificador.
+                            </p>
+                        </div>
+                        <div
+                            v-if="isLinkedIn(pub.platform) && linkedInObservations(pub).length"
+                            class="sm:col-span-2 rounded-lg border border-slate-700/80 bg-slate-950/80 px-3 py-2"
+                        >
                             <ul class="space-y-1 text-xs text-slate-500">
                                 <li v-for="(note, noteIndex) in linkedInObservations(pub)" :key="noteIndex">
                                     • {{ note }}
@@ -587,8 +646,19 @@ function openSchedulePicker(event) {
                         </div>
                     </div>
 
+                    <p
+                        v-if="pub.queued_publish_at && (pub.status === 'queued' || new Date(pub.queued_publish_at) > new Date())"
+                        class="mt-2 text-sm text-sky-300"
+                    >
+                        En cola en la app para el {{ new Date(pub.queued_publish_at).toLocaleString('es-CO') }}
+                        <span class="block text-xs text-slate-500">
+                            Configura la frecuencia en
+                            <Link :href="route('settings.index')" class="text-sky-400 hover:underline">Configuración → Planificador</Link>
+                            y deja <code class="text-slate-400">schedule:work</code> activo.
+                        </span>
+                    </p>
                     <p v-if="pub.status === 'scheduled' && pub.scheduled_at" class="mt-2 text-sm text-amber-400">
-                        Programado en Meta para el {{ new Date(pub.scheduled_at).toLocaleString('es-CO') }}
+                        Programado en la plataforma para el {{ new Date(pub.scheduled_at).toLocaleString('es-CO') }}
                         <span v-if="isFacebook(pub.platform)" class="block text-xs text-slate-500">
                             Meta lo hará público a esa hora. El enlace aparece cuando abras este video después de publicarse.
                         </span>

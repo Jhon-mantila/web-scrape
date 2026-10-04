@@ -46,6 +46,13 @@ class PublishAllSocialPublicationsAction
                 continue;
             }
 
+            if ($publication->queued_publish_at?->isFuture()) {
+                $skipped++;
+                $this->progressSkip($progressUserId, $stepKey, 'En cola (app)');
+
+                continue;
+            }
+
             if ($processed > 0) {
                 // Tras subidas pesadas (YouTube/Facebook), el DNS del contenedor puede fallar momentáneamente.
                 sleep(3);

@@ -47,8 +47,11 @@ class SocialPublishRunPlanner
             return false;
         }
 
-        return $publication->status !== PublicationStatus::Published
-            && $publication->status !== PublicationStatus::Scheduled;
+        if (in_array($publication->status, [PublicationStatus::Published, PublicationStatus::Scheduled], true)) {
+            return false;
+        }
+
+        return ! ($publication->queued_publish_at?->isFuture() ?? false);
     }
 
     private function platformLabel(SocialPublication $publication): string

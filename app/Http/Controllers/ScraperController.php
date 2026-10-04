@@ -7,10 +7,12 @@ use App\Models\NewsAiArticle;
 use App\Models\NewsDetail;
 use App\ProcessScraping\Actions\DownloadFeaturedImagesAction;
 use App\ProcessScraping\Actions\ProcessBackgroundRunQueueAction;
+use App\ProcessScraping\Support\FeaturedImageStorage;
 use App\ProcessScraping\Actions\GenerateNewsAiArticleAction;
 use App\Http\Support\RequestsBackgroundJson;
 use App\ProcessScraping\Support\PipelineRunState;
-use App\ProcessScraping\Ai\OllamaClient;
+use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
+use App\ProcessScraping\Ai\Support\AiSettings;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
 use App\Scraper\Support\NewsScraperStats;
@@ -129,7 +131,7 @@ class ScraperController extends Controller
         Request $request,
         News $news,
         GenerateNewsAiArticleAction $action,
-        OllamaClient $ollama,
+        TextGenerationClient $llm,
     ): JsonResponse {
         $news->loadMissing(['detail', 'aiArticle']);
 
@@ -164,8 +166,8 @@ class ScraperController extends Controller
             return response()->json(['message' => $error], 422);
         }
 
-        if (config('services.ollama.unload_after_generate')) {
-            $ollama->unloadModels();
+        if (AiSettings::shouldUnloadAfterGenerate() && $llm->supportsModelUnload()) {
+            $llm->unloadModels();
         }
 
         $news->refresh()->load(['detail', 'aiArticle']);
@@ -191,14 +193,17 @@ class ScraperController extends Controller
         }
 
         $validated = $request->validate([
-            'limit' => 'nullable|integer|min:1|max:200',
+            'limit' => 'nullable|integer|min:1|max:500',
+            'all' => 'boolean',
             'force' => 'boolean',
         ]);
 
         set_time_limit(0);
 
         try {
-            $limit = isset($validated['limit']) ? (int) $validated['limit'] : 50;
+            $limit = ($validated['all'] ?? false)
+                ? 0
+                : (isset($validated['limit']) ? (int) $validated['limit'] : 50);
             $onlyMissing = ! ($validated['force'] ?? false);
             $summary = $action->execute($limit, $onlyMissing);
 
@@ -228,6 +233,61 @@ class ScraperController extends Controller
             Log::error('Adjuntar imágenes WP falló', ['message' => $exception->getMessage()]);
 
             return back()->with('error', 'Error al adjuntar imágenes: '.$exception->getMessage());
+        }
+    }
+
+    public function downloadFeaturedImages(Request $request, DownloadFeaturedImagesAction $action): RedirectResponse
+    {
+        $validated = $request->validate([
+            'limit' => 'nullable|integer|min:1|max:200',
+            'skip_generate' => 'boolean',
+            'news_id' => 'nullable|integer|exists:news,id',
+        ]);
+
+        set_time_limit(0);
+
+        if (! FeaturedImageStorage::ensureWritable()) {
+            return back()->with(
+                'error',
+                'No se puede escribir en storage/app/public/featured-images. '
+                .'En Docker: docker exec -u root laravel_app chown -R 1000:1000 storage/app/public/featured-images',
+            );
+        }
+
+        try {
+            if (isset($validated['news_id'])) {
+                $news = News::query()->with('detail')->findOrFail((int) $validated['news_id']);
+                $skipGenerate = (bool) ($validated['skip_generate'] ?? false);
+                $result = $action->ensureFeaturedImageReady($news, $skipGenerate);
+                $news->refresh()->load('detail');
+
+                if ($result !== null) {
+                    return back()->with('success', "Imagen descargada para noticia #{$news->id}.");
+                }
+
+                return back()->with(
+                    'error',
+                    "No se pudo obtener imagen para la noticia #{$news->id}. Revisa laravel.log (featured_image).",
+                );
+            }
+
+            $limit = max(1, (int) ($validated['limit'] ?? 20));
+            $skipGenerate = (bool) ($validated['skip_generate'] ?? false);
+            $summary = $action->execute($limit, $skipGenerate);
+
+            $message = sprintf(
+                'Descarga de imágenes: %d descargadas/generadas · %d omitidas · %d fallidas (procesadas %d).',
+                $summary['success'],
+                $summary['skipped'],
+                $summary['failed'],
+                $summary['processed'],
+            );
+
+            return back()->with($summary['failed'] > 0 && $summary['success'] === 0 ? 'error' : 'success', $message);
+        } catch (Throwable $exception) {
+            Log::error('Descarga de imágenes falló', ['message' => $exception->getMessage()]);
+
+            return back()->with('error', 'Error al descargar imágenes: '.$exception->getMessage());
         }
     }
 

@@ -35,17 +35,39 @@ return [
         ],
     ],
 
+    /*
+    | Proveedor de IA para artículos y captions:
+    | ollama_local | deepseek | ollama_api
+    */
+    'ai' => [
+        'provider' => env('AI_PROVIDER', 'ollama_local'),
+        'premium_min_chars' => (int) env('AI_PREMIUM_MIN_CHARS', env('OLLAMA_PREMIUM_MIN_CHARS', 4500)),
+        'timeout' => (int) env('AI_TIMEOUT', env('OLLAMA_TIMEOUT', 600)),
+        'format_json' => filter_var(env('AI_FORMAT_JSON', env('OLLAMA_FORMAT_JSON', true)), FILTER_VALIDATE_BOOLEAN),
+        'temperature' => (float) env('AI_TEMPERATURE', env('OLLAMA_TEMPERATURE', 0.75)),
+        'max_tokens' => (int) env('AI_MAX_TOKENS', env('OLLAMA_NUM_PREDICT', 6144)),
+    ],
+
     'ollama' => [
         'url' => env('OLLAMA_URL', 'http://localhost:11434'),
         'model' => env('OLLAMA_MODEL', 'qwen3:14b'),
         'model_premium' => env('OLLAMA_MODEL_PREMIUM', 'qwen3:30b-a3b'),
-        'premium_min_chars' => (int) env('OLLAMA_PREMIUM_MIN_CHARS', 4500),
-        'timeout' => (int) env('OLLAMA_TIMEOUT', 600),
-        'format_json' => filter_var(env('OLLAMA_FORMAT_JSON', true), FILTER_VALIDATE_BOOLEAN),
-        'temperature' => (float) env('OLLAMA_TEMPERATURE', 0.75),
         'num_ctx' => (int) env('OLLAMA_NUM_CTX', 16384),
-        'num_predict' => (int) env('OLLAMA_NUM_PREDICT', 4096),
         'unload_after_generate' => filter_var(env('OLLAMA_UNLOAD_AFTER_GENERATE', true), FILTER_VALIDATE_BOOLEAN),
+    ],
+
+    'deepseek' => [
+        'api_key' => env('DEEPSEEK_API_KEY'),
+        'base_url' => env('DEEPSEEK_BASE_URL', 'https://api.deepseek.com'),
+        'model' => env('DEEPSEEK_MODEL', 'deepseek-chat'),
+        'model_premium' => env('DEEPSEEK_MODEL_PREMIUM', 'deepseek-chat'),
+    ],
+
+    'ollama_api' => [
+        'api_key' => env('OLLAMA_API_KEY'),
+        'base_url' => env('OLLAMA_API_BASE_URL', 'https://ollama.com/api'),
+        'model' => env('OLLAMA_API_MODEL', env('OLLAMA_MODEL', 'qwen3:14b')),
+        'model_premium' => env('OLLAMA_API_MODEL_PREMIUM', env('OLLAMA_MODEL_PREMIUM')),
     ],
 
     'wordpress' => [

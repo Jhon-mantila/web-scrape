@@ -103,6 +103,26 @@ class SendPostToWordpressAction
                 }
 
                 $response = $this->client->createPost($payload, $account);
+                $postId = (int) ($response['id'] ?? 0);
+
+                if ($featuredMediaId === null && $postId > 0) {
+                    $featuredMediaId = $this->featuredMediaUploader->uploadForArticle($article, $account);
+
+                    if ($featuredMediaId !== null) {
+                        $response = $this->client->updatePost($postId, [
+                            'featured_media' => $featuredMediaId,
+                        ], $account);
+                    }
+                }
+
+                if ($featuredMediaId === null) {
+                    Log::error('wordpress: post creado sin imagen destacada', [
+                        'news_ai_id' => $article->id,
+                        'news_id' => $article->news_id,
+                        'wordpress_post_id' => $postId,
+                    ]);
+                }
+
                 $meta = $this->postMetaParser->fromApiPost($response);
 
                 if ($mode === 'schedule' && $meta['scheduled_at'] === null && isset($payload['date'])) {
