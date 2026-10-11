@@ -9,6 +9,8 @@ use App\ProcessScraping\Actions\DownloadFeaturedImagesAction;
 use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
 use App\ProcessScraping\Ai\Exceptions\AiProviderException;
 use App\ProcessScraping\Ai\OllamaModelSelector;
+use App\ProcessScraping\Support\ScraperArticleAiContext;
+use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
 use App\ProcessScraping\Prompts\ArticleGenerationPrompt;
 use App\ProcessScraping\Prompts\ArticleTypeClassifier;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
@@ -20,11 +22,16 @@ use Throwable;
 class GenerateNewsAiArticleAction
 {
     public function __construct(
-        private readonly TextGenerationClient $llm,
+        private readonly VideoCaptionAiClientFactory $clientFactory,
         private readonly AiArticleResponseParser $parser,
         private readonly ArticleTypeClassifier $classifier,
         private readonly OllamaModelSelector $modelSelector,
     ) {}
+
+    private function llm(): TextGenerationClient
+    {
+        return $this->clientFactory->client(ScraperArticleAiContext::get());
+    }
 
     /**
      * @return array{processed: int, success: int, failed: int, news_ids: list<int>, errors: list<array{news_id: int, message: string}>}
@@ -89,7 +96,7 @@ class GenerateNewsAiArticleAction
                         $prompt .= "\n\nTu respuesta anterior no fue JSON válido o vino vacío. Responde SOLO con JSON puro con las claves title, excerpt y html. Sin ``` ni texto adicional.";
                     }
 
-                    $body = $this->llm->generate(
+                    $body = $this->llm()->generate(
                         ArticleGenerationPrompt::system($articleType),
                         $prompt,
                         $model,

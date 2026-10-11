@@ -13,6 +13,8 @@ use App\SocialPublishing\Actions\PublishSocialPublicationAction;
 use App\SocialPublishing\Actions\PromoteDueScheduledPublicationsAction;
 use App\SocialPublishing\Enums\Platform;
 use App\SocialPublishing\Enums\PublicationStatus;
+use App\SocialPublishing\Enums\VideoCaptionAiProvider;
+use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
 use App\SocialPublishing\Platforms\Facebook\FacebookPageFeedScheduler;
 use App\SocialPublishing\Platforms\Facebook\FacebookVideoDeleter;
 use App\SocialPublishing\Platforms\Facebook\FacebookVideoMetadata;
@@ -26,6 +28,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -49,10 +52,11 @@ class SocialVideoController extends Controller
         ]);
     }
 
-    public function create(): Response
+    public function create(VideoCaptionAiClientFactory $captionAi): Response
     {
         return Inertia::render('Videos/Create', [
             'platformOptions' => $this->platformOptions(),
+            'captionAiOptions' => $captionAi->optionsForUi(),
         ]);
     }
 
@@ -65,12 +69,28 @@ class SocialVideoController extends Controller
             'notes' => 'nullable|string|max:2000',
             'platforms' => 'required|array|min:1',
             'platforms.*' => 'string|in:'.implode(',', Platform::values()),
-            'video' => 'required|file|mimes:'.implode(',', config('social.upload.video_mimes')).'|max:'.($maxMb * 1024),
+            'video' => $this->videoUploadRules($maxMb),
             'thumbnail' => 'nullable|file|mimes:'.implode(',', config('social.upload.thumbnail_mimes')).'|max:10240',
+            'caption_ai_provider' => $this->captionAiProviderValidation(),
         ]);
 
         DB::transaction(function () use ($request, $validated): void {
-            $videoPath = $request->file('video')->store('social-videos', 'public');
+            $uploadedVideo = $request->file('video');
+
+            if (! $uploadedVideo instanceof \Illuminate\Http\UploadedFile || ! $uploadedVideo->isValid()) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'video' => 'El archivo de video no llegó bien al servidor. Vuelve a elegirlo e intenta otra vez.',
+                ]);
+            }
+
+            $videoPath = $uploadedVideo->store('social-videos', 'public');
+
+            if (! is_string($videoPath) || $videoPath === '' || ! str_contains($videoPath, '/')) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'video' => 'No se pudo guardar el video en disco. Revisa permisos de storage/app/public.',
+                ]);
+            }
+
             $thumbPath = $request->hasFile('thumbnail')
                 ? $request->file('thumbnail')->store('social-thumbnails', 'public')
                 : null;
@@ -81,6 +101,8 @@ class SocialVideoController extends Controller
                 'video_path' => $videoPath,
                 'thumbnail_path' => $thumbPath,
                 'notes' => $validated['notes'] ?? null,
+                'caption_ai_provider' => $validated['caption_ai_provider']
+                    ?? VideoCaptionAiProvider::OllamaLocal->value,
             ]);
 
             foreach ($validated['platforms'] as $platform) {
@@ -109,6 +131,7 @@ class SocialVideoController extends Controller
         return Inertia::render('Videos/Show', [
             'video' => $this->videoPayload($video, detailed: true),
             'platformOptions' => $this->platformOptions(),
+            'captionAiOptions' => app(VideoCaptionAiClientFactory::class)->optionsForUi(),
         ]);
     }
 
@@ -125,6 +148,7 @@ class SocialVideoController extends Controller
             'publications.*.caption_edited' => 'nullable|string|max:10000',
             'publications.*.scheduled_at' => 'nullable|date',
             'publications.*.queued_publish_at' => 'nullable|date',
+            'caption_ai_provider' => $this->captionAiProviderValidation(),
         ]);
 
         $updates = [];
@@ -132,6 +156,10 @@ class SocialVideoController extends Controller
         if (isset($validated['title'])) {
             $updates['title'] = $validated['title'];
             $updates['notes'] = $validated['notes'] ?? $video->notes;
+        }
+
+        if (array_key_exists('caption_ai_provider', $validated) && $validated['caption_ai_provider'] !== null) {
+            $updates['caption_ai_provider'] = $validated['caption_ai_provider'];
         }
 
         if ($request->hasFile('thumbnail')) {
@@ -170,9 +198,17 @@ class SocialVideoController extends Controller
     ): RedirectResponse {
         $this->authorizeVideo($request, $video);
 
+        if (! $video->usesCaptionAi()) {
+            return back()->with('error', 'Este video no usa IA. Cambia «Generación de textos» y guarda, o elige Ollama/DeepSeek al subir.');
+        }
+
         $platforms = $request->input('platforms');
 
-        $action->execute($video, is_array($platforms) ? $platforms : null);
+        try {
+            $action->execute($video, is_array($platforms) ? $platforms : null);
+        } catch (\InvalidArgumentException $e) {
+            return back()->with('error', $e->getMessage());
+        }
 
         return back()->with('success', 'Textos generados con IA.');
     }
@@ -184,7 +220,15 @@ class SocialVideoController extends Controller
     ): RedirectResponse {
         $this->authorizeVideo($request, $video);
 
-        $action->execute($video);
+        if (! $video->usesCaptionAi()) {
+            return back()->with('error', 'Este video no usa IA para títulos.');
+        }
+
+        try {
+            $action->execute($video);
+        } catch (\InvalidArgumentException $e) {
+            return back()->with('error', $e->getMessage());
+        }
 
         return back()->with('success', 'Título generado con IA.');
     }
@@ -436,18 +480,24 @@ class SocialVideoController extends Controller
      */
     private function videoPayload(SocialVideo $video, bool $detailed = false): array
     {
-        $videoSizeBytes = VideoFileSize::bytesFromPath(
-            Storage::disk('public')->path($video->video_path),
-        );
-        $videoMetadata = FacebookVideoMetadata::tryFromPath(
-            Storage::disk('public')->path($video->video_path),
-        );
+        $videoOnDisk = is_string($video->video_path)
+            && $video->video_path !== ''
+            && str_contains($video->video_path, '/')
+            && Storage::disk('public')->exists($video->video_path);
+
+        $videoSizeBytes = $videoOnDisk
+            ? VideoFileSize::bytesFromPath(Storage::disk('public')->path($video->video_path))
+            : 0;
+        $videoMetadata = $videoOnDisk
+            ? FacebookVideoMetadata::tryFromPath(Storage::disk('public')->path($video->video_path))
+            : null;
 
         return [
             'id' => $video->id,
             'title' => $video->title,
             'notes' => $video->notes,
-            'video_url' => $this->publicStorageUrl($video->video_path),
+            'video_url' => $videoOnDisk ? $this->publicStorageUrl($video->video_path) : null,
+            'video_missing' => ! $videoOnDisk,
             'video_size_bytes' => $videoSizeBytes,
             'video_size_label' => VideoFileSize::label($videoSizeBytes),
             'video_size_mb' => VideoFileSize::megabytes($videoSizeBytes),
@@ -459,6 +509,9 @@ class SocialVideoController extends Controller
                 ? $this->publicStorageUrl($video->thumbnail_path)
                 : null,
             'has_thumbnail' => $video->thumbnail_path !== null && $video->thumbnail_path !== '',
+            'caption_ai_provider' => $video->captionAiProvider()->value,
+            'caption_ai_provider_label' => $video->captionAiProvider()->label(),
+            'uses_caption_ai' => $video->usesCaptionAi(),
             'created_at' => $video->created_at?->toIso8601String(),
             'publications' => $video->publications->map(fn (SocialPublication $p) => [
                 'id' => $p->id,
@@ -488,6 +541,63 @@ class SocialVideoController extends Controller
     /**
      * @return list<array{key: string, label: string, enabled: bool, coming_soon: bool}>
      */
+    /**
+     * @return array<int, string|\Illuminate\Validation\Rules\In>
+     */
+    /**
+     * @return list<string|\Closure>
+     */
+    private function videoUploadRules(int $maxMb): array
+    {
+        $maxKb = $maxMb * 1024;
+
+        return [
+            'required',
+            'file',
+            'max:'.$maxKb,
+            function (string $attribute, mixed $value, \Closure $fail): void {
+                if (! $value instanceof \Illuminate\Http\UploadedFile) {
+                    $fail('Selecciona un archivo de video.');
+
+                    return;
+                }
+
+                $allowedExt = array_map(
+                    strtolower(...),
+                    config('social.upload.video_mimes', ['mp4', 'mov', 'webm']),
+                );
+                $extension = strtolower($value->getClientOriginalExtension() ?: '');
+                $mime = strtolower((string) $value->getMimeType());
+                $allowedMime = array_map(
+                    strtolower(...),
+                    config('social.upload.video_mimetypes', []),
+                );
+
+                $extOk = $extension !== '' && in_array($extension, $allowedExt, true);
+                $mimeOk = $mime !== '' && in_array($mime, $allowedMime, true);
+
+                if (! $extOk && ! $mimeOk) {
+                    $fail('El video debe ser MP4, MOV o WebM (detectado: .'.$extension.' / '.$mime.').');
+                }
+            },
+        ];
+    }
+
+    private function captionAiProviderValidation(): array
+    {
+        return [
+            'nullable',
+            'string',
+            Rule::in(VideoCaptionAiProvider::values()),
+            function (string $attribute, mixed $value, \Closure $fail): void {
+                if ($value === VideoCaptionAiProvider::Deepseek->value
+                    && ! filled(config('services.deepseek.api_key'))) {
+                    $fail('DeepSeek no está configurado. Añade DEEPSEEK_API_KEY al .env.');
+                }
+            },
+        ];
+    }
+
     private function platformOptions(): array
     {
         return collect(config('social.platforms', []))

@@ -2,7 +2,7 @@
 import axios from 'axios';
 import { Link, router, useForm } from '@inertiajs/vue3';
 import { syncBackgroundRunAfterInertiaStart } from '@/support/backgroundRun.js';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
 const props = defineProps({
@@ -56,6 +56,10 @@ const props = defineProps({
         type: Object,
         default: () => ({ data: [] }),
     },
+    captionAiOptions: {
+        type: Array,
+        default: () => [],
+    },
 });
 
 const searchQuery = ref(props.filters.q || '');
@@ -63,6 +67,9 @@ let searchTimer = null;
 
 const pipelineForm = useForm({
     limit: props.pipeline.limit ?? 5,
+    article_ai_provider: props.pipeline.article_ai_provider ?? 'ollama_local',
+    article_ollama_target: props.pipeline.article_ollama_target ?? 'local',
+    article_ai_model: props.pipeline.article_ai_model ?? 'qwen3:14b',
     send_wordpress: false,
     wordpress_only: false,
     mode: 'schedule',
@@ -236,6 +243,53 @@ const previewData = ref(null);
 const previewNewsId = ref(null);
 const regeneratingAi = ref(false);
 const regenerateIncludeRawHtml = ref(true);
+const regenerateArticleAiProvider = ref('ollama_local');
+const regenerateArticleOllamaTarget = ref('local');
+const regenerateArticleAiModel = ref('qwen3:14b');
+const ollamaModels = ref([]);
+const ollamaModelsLoading = ref(false);
+const ollamaModelsError = ref('');
+
+const ollamaRemoteConfigured = computed(() => props.pipeline.ollama?.remote_configured ?? false);
+const ollamaRemoteHost = computed(() => props.pipeline.ollama?.remote_host ?? 'Cloudflare');
+
+async function loadOllamaModels(target) {
+    ollamaModelsLoading.value = true;
+    ollamaModelsError.value = '';
+
+    try {
+        const { data } = await axios.get(route('scraper.ollama-models'), {
+            params: { target },
+        });
+
+        ollamaModels.value = data.models ?? [];
+        const names = ollamaModels.value.map((m) => m.name);
+        const preferred = pipelineForm.article_ai_model || data.default_model || 'qwen3:14b';
+
+        if (names.includes(preferred)) {
+            pipelineForm.article_ai_model = preferred;
+        } else if (names.includes(data.default_model)) {
+            pipelineForm.article_ai_model = data.default_model;
+        } else if (names.length > 0) {
+            pipelineForm.article_ai_model = names[0];
+        }
+    } catch (error) {
+        ollamaModels.value = [];
+        ollamaModelsError.value =
+            error.response?.data?.message || 'No se pudieron cargar los modelos de Ollama.';
+    } finally {
+        ollamaModelsLoading.value = false;
+    }
+}
+
+watch(
+    () => [pipelineForm.article_ai_provider, pipelineForm.article_ollama_target],
+    ([provider, target]) => {
+        if (provider === 'ollama_local') {
+            loadOllamaModels(target || 'local');
+        }
+    },
+);
 
 function onEscapeKey(event) {
     if (event.key === 'Escape' && previewOpen.value) {
@@ -245,6 +299,10 @@ function onEscapeKey(event) {
 
 onMounted(() => {
     document.addEventListener('keydown', onEscapeKey);
+
+    if (pipelineForm.article_ai_provider === 'ollama_local') {
+        loadOllamaModels(pipelineForm.article_ollama_target);
+    }
 });
 
 onUnmounted(() => {
@@ -612,6 +670,11 @@ async function openPreview(item) {
     previewError.value = '';
     previewData.value = null;
     regenerateIncludeRawHtml.value = pipelineForm.include_raw_html;
+    regenerateArticleAiProvider.value = pipelineForm.article_ai_provider === 'none'
+        ? 'ollama_local'
+        : pipelineForm.article_ai_provider;
+    regenerateArticleOllamaTarget.value = pipelineForm.article_ollama_target;
+    regenerateArticleAiModel.value = pipelineForm.article_ai_model;
 
     try {
         const { data } = await axios.get(route('scraper.preview', item.id));
@@ -638,7 +701,12 @@ async function regeneratePreviewAi() {
     try {
         const { data } = await axios.post(
             route('scraper.regenerate-ai', previewNewsId.value),
-            { include_raw_html: regenerateIncludeRawHtml.value },
+            {
+                include_raw_html: regenerateIncludeRawHtml.value,
+                article_ai_provider: regenerateArticleAiProvider.value,
+                article_ollama_target: regenerateArticleOllamaTarget.value,
+                article_ai_model: regenerateArticleAiModel.value,
+            },
             { headers: csrfHeaders() },
         );
 
@@ -860,6 +928,97 @@ function closePreview() {
                     >
                         {{ preset.label }}
                     </button>
+                </div>
+
+                <div
+                    v-if="!pipelineForm.wordpress_only"
+                    class="mt-4 rounded-xl border border-slate-800 bg-slate-950/60 p-3"
+                >
+                    <p class="mb-2 text-xs font-medium text-slate-300">IA para artículos</p>
+                    <div class="flex flex-wrap gap-3">
+                        <label
+                            v-for="opt in captionAiOptions"
+                            :key="opt.value"
+                            class="flex cursor-pointer items-start gap-2 text-xs"
+                            :class="opt.disabled ? 'cursor-not-allowed opacity-50' : ''"
+                        >
+                            <input
+                                v-model="pipelineForm.article_ai_provider"
+                                type="radio"
+                                name="article_ai_provider"
+                                :value="opt.value"
+                                :disabled="opt.disabled"
+                                class="mt-0.5"
+                            />
+                            <span>
+                                <span class="font-medium text-slate-200">{{ opt.label }}</span>
+                                <span class="mt-0.5 block text-slate-500">{{ opt.hint }}</span>
+                            </span>
+                        </label>
+                    </div>
+                    <div
+                        v-if="pipelineForm.article_ai_provider === 'ollama_local'"
+                        class="mt-3 space-y-3 border-t border-slate-800 pt-3"
+                    >
+                        <p class="text-xs font-medium text-slate-400">Conexión Ollama</p>
+                        <div class="flex flex-wrap gap-4 text-xs">
+                            <label class="flex cursor-pointer items-center gap-2">
+                                <input
+                                    v-model="pipelineForm.article_ollama_target"
+                                    type="radio"
+                                    name="article_ollama_target"
+                                    value="local"
+                                />
+                                <span class="text-slate-200">Local ({{ pipeline.ollama?.local_hint ?? 'OLLAMA_URL' }})</span>
+                            </label>
+                            <label
+                                class="flex items-center gap-2"
+                                :class="ollamaRemoteConfigured ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'"
+                            >
+                                <input
+                                    v-model="pipelineForm.article_ollama_target"
+                                    type="radio"
+                                    name="article_ollama_target"
+                                    value="remote"
+                                    :disabled="!ollamaRemoteConfigured"
+                                />
+                                <span class="text-slate-200">
+                                    Cloudflare
+                                    <span v-if="ollamaRemoteHost" class="text-slate-500">({{ ollamaRemoteHost }})</span>
+                                </span>
+                            </label>
+                        </div>
+                        <p v-if="!ollamaRemoteConfigured" class="text-xs text-slate-500">
+                            Remoto: define <code class="text-slate-400">OLLAMA_REMOTE_URL=https://esquina-api.cloud</code> en .env.
+                        </p>
+                        <label class="block text-xs text-slate-400">
+                            Modelo
+                            <select
+                                v-model="pipelineForm.article_ai_model"
+                                class="mt-1 w-full max-w-md rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-white disabled:opacity-50"
+                                :disabled="ollamaModelsLoading || ollamaModels.length === 0"
+                            >
+                                <option v-if="ollamaModelsLoading" value="">Cargando modelos…</option>
+                                <option
+                                    v-for="m in ollamaModels"
+                                    :key="m.name"
+                                    :value="m.name"
+                                >
+                                    {{ m.name }}
+                                </option>
+                            </select>
+                        </label>
+                        <p v-if="ollamaModelsError" class="text-xs text-red-400">{{ ollamaModelsError }}</p>
+                        <p v-else-if="!ollamaModelsLoading && ollamaModels.length === 0" class="text-xs text-amber-400/90">
+                            No hay modelos en ese destino. Comprueba que Ollama esté arriba y que el túnel responda en /api/tags.
+                        </p>
+                    </div>
+                    <p
+                        v-if="pipelineForm.article_ai_provider === 'none'"
+                        class="mt-2 text-xs text-amber-400/90"
+                    >
+                        El paso de generación IA se omitirá (detalle, imágenes e investigación siguen si aplica).
+                    </p>
                 </div>
 
                 <div class="mt-4 flex flex-wrap items-end gap-x-4 gap-y-3">
@@ -1239,6 +1398,20 @@ function closePreview() {
                     </div>
                     <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
                         <template v-if="previewData?.can_regenerate">
+                            <select
+                                v-model="regenerateArticleAiProvider"
+                                class="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white"
+                                :disabled="regeneratingAi || previewLoading"
+                            >
+                                <option
+                                    v-for="opt in captionAiOptions.filter((o) => o.value !== 'none')"
+                                    :key="opt.value"
+                                    :value="opt.value"
+                                    :disabled="opt.disabled"
+                                >
+                                    {{ opt.label }}
+                                </option>
+                            </select>
                             <label class="flex cursor-pointer items-center gap-1.5 text-xs text-slate-400">
                                 <input
                                     v-model="regenerateIncludeRawHtml"

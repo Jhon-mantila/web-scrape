@@ -22,6 +22,35 @@ class AiSettings
         };
     }
 
+    /**
+     * Usa un modelo configurado (p. ej. SOCIAL_*_MODEL) solo si encaja con el proveedor activo.
+     */
+    public static function resolveConfiguredModel(?string $configured): string
+    {
+        $configured = trim((string) ($configured ?? ''));
+
+        if ($configured === '') {
+            return self::defaultModel();
+        }
+
+        $provider = self::provider();
+
+        if ($provider === 'deepseek' && ! self::isDeepSeekModelName($configured)) {
+            return self::defaultModel();
+        }
+
+        if ($provider !== 'deepseek' && self::isDeepSeekModelName($configured)) {
+            return self::defaultModel();
+        }
+
+        return $configured;
+    }
+
+    private static function isDeepSeekModelName(string $model): bool
+    {
+        return str_starts_with(strtolower($model), 'deepseek');
+    }
+
     public static function premiumModel(): ?string
     {
         $premium = match (self::provider()) {
@@ -68,4 +97,5 @@ class AiSettings
 
         return (bool) config('services.ollama.unload_after_generate', true);
     }
+
 }

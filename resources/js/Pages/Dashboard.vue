@@ -9,6 +9,7 @@ const props = defineProps({
         default: () => ({
             total_videos: 0,
             pending: 0,
+            queued: 0,
             scheduled: 0,
             published: 0,
             failed: 0,
@@ -36,6 +37,7 @@ const props = defineProps({
 const videoStatCards = computed(() => [
     { key: 'total_videos', label: 'Videos subidos', value: props.stats.total_videos, class: 'text-white' },
     { key: 'pending', label: 'Pendientes', value: props.stats.pending, class: 'text-amber-300' },
+    { key: 'queued', label: 'En cola (app)', value: props.stats.queued, class: 'text-cyan-300' },
     { key: 'scheduled', label: 'Programados', value: props.stats.scheduled, class: 'text-sky-300' },
     { key: 'published', label: 'Publicados', value: props.stats.published, class: 'text-emerald-300' },
     { key: 'failed', label: 'Con error', value: props.stats.failed, class: 'text-red-400' },

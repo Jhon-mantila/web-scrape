@@ -9,10 +9,14 @@ use App\ProcessScraping\Actions\DownloadFeaturedImagesAction;
 use App\ProcessScraping\Actions\ProcessBackgroundRunQueueAction;
 use App\ProcessScraping\Support\FeaturedImageStorage;
 use App\ProcessScraping\Actions\GenerateNewsAiArticleAction;
+use App\ProcessScraping\Ai\ListOllamaModelsAction;
+use App\ProcessScraping\Ai\Support\OllamaConnectivity;
 use App\Http\Support\RequestsBackgroundJson;
 use App\ProcessScraping\Support\PipelineRunState;
-use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
 use App\ProcessScraping\Ai\Support\AiSettings;
+use App\ProcessScraping\Support\ScraperArticleAiContext;
+use App\SocialPublishing\Enums\VideoCaptionAiProvider;
+use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
 use App\Scraper\Support\NewsScraperStats;
@@ -109,6 +113,7 @@ class ScraperController extends Controller
                 'per_page_options' => self::LIST_PER_PAGE_OPTIONS,
             ],
             'news' => $news->through(fn (News $item) => $this->newsPayload($item)),
+            'captionAiOptions' => app(VideoCaptionAiClientFactory::class)->optionsForUi(),
         ]);
     }
 
@@ -131,7 +136,7 @@ class ScraperController extends Controller
         Request $request,
         News $news,
         GenerateNewsAiArticleAction $action,
-        TextGenerationClient $llm,
+        VideoCaptionAiClientFactory $clientFactory,
     ): JsonResponse {
         $news->loadMissing(['detail', 'aiArticle']);
 
@@ -149,16 +154,33 @@ class ScraperController extends Controller
 
         $validated = $request->validate([
             'include_raw_html' => 'boolean',
+            'article_ai_provider' => $this->articleAiProviderValidation(),
+            'article_ollama_target' => $this->articleOllamaTargetValidation(),
+            'article_ai_model' => $this->articleAiModelValidation(),
         ]);
+
+        $provider = $validated['article_ai_provider'] ?? VideoCaptionAiProvider::OllamaLocal->value;
+
+        if ($provider === VideoCaptionAiProvider::None->value) {
+            return response()->json([
+                'message' => 'Elige Ollama local o DeepSeek para regenerar con IA.',
+            ], 422);
+        }
 
         set_time_limit(0);
 
-        $summary = $action->execute(
-            1,
-            true,
-            (bool) ($validated['include_raw_html'] ?? true),
-            [$news->id],
-        );
+        ScraperArticleAiContext::applyFromPipelineOptions($validated);
+
+        try {
+            $summary = $action->execute(
+                1,
+                true,
+                (bool) ($validated['include_raw_html'] ?? true),
+                [$news->id],
+            );
+        } finally {
+            ScraperArticleAiContext::reset();
+        }
 
         if ($summary['success'] === 0) {
             $error = $summary['errors'][0]['message'] ?? 'No se pudo regenerar el artículo con IA.';
@@ -166,8 +188,12 @@ class ScraperController extends Controller
             return response()->json(['message' => $error], 422);
         }
 
-        if (AiSettings::shouldUnloadAfterGenerate() && $llm->supportsModelUnload()) {
-            $llm->unloadModels();
+        if (AiSettings::shouldUnloadAfterGenerate()) {
+            $llm = $clientFactory->client($provider);
+
+            if ($llm->supportsModelUnload()) {
+                $llm->unloadModels();
+            }
         }
 
         $news->refresh()->load(['detail', 'aiArticle']);
@@ -350,6 +376,9 @@ class ScraperController extends Controller
             'skip_generate' => 'boolean',
             'force' => 'boolean',
             'include_raw_html' => 'boolean',
+            'article_ai_provider' => $this->articleAiProviderValidation(),
+            'article_ollama_target' => $this->articleOllamaTargetValidation(),
+            'article_ai_model' => $this->articleAiModelValidation(),
         ]);
 
         $options = [
@@ -357,6 +386,12 @@ class ScraperController extends Controller
             'send_wordpress' => $shouldSendWordpress,
             'wordpress_only' => $wordpressOnly,
             'mode' => (string) ($validated['mode'] ?? 'draft'),
+            'article_ai_provider' => $validated['article_ai_provider']
+                ?? VideoCaptionAiProvider::OllamaLocal->value,
+            'article_ollama_target' => $validated['article_ollama_target']
+                ?? (string) config('services.scraper.article_ollama_target', OllamaConnectivity::TARGET_LOCAL),
+            'article_ai_model' => $validated['article_ai_model']
+                ?? (string) config('services.scraper.article_ai_default_model'),
         ];
 
         $run = PipelineRunState::start($user->id, $options);
@@ -451,13 +486,88 @@ class ScraperController extends Controller
     /**
      * @return array<string, mixed>
      */
+    /**
+     * @return array<int, string|\Illuminate\Validation\Rules\In>
+     */
+    public function ollamaModels(Request $request, ListOllamaModelsAction $action): JsonResponse
+    {
+        $validated = $request->validate([
+            'target' => ['required', 'string', Rule::in([
+                OllamaConnectivity::TARGET_LOCAL,
+                OllamaConnectivity::TARGET_REMOTE,
+            ])],
+        ]);
+
+        try {
+            $models = $action->execute($validated['target']);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'models' => $models,
+            'default_model' => (string) config('services.scraper.article_ai_default_model'),
+        ]);
+    }
+
+    private function articleAiProviderValidation(): array
+    {
+        return [
+            'nullable',
+            'string',
+            Rule::in(VideoCaptionAiProvider::values()),
+            function (string $attribute, mixed $value, \Closure $fail): void {
+                if ($value === VideoCaptionAiProvider::Deepseek->value
+                    && ! filled(config('services.deepseek.api_key'))) {
+                    $fail('DeepSeek no está configurado. Añade DEEPSEEK_API_KEY al .env.');
+                }
+            },
+        ];
+    }
+
+    /**
+     * @return array<int, string|\Illuminate\Validation\Rules\In|\Closure>
+     */
+    private function articleOllamaTargetValidation(): array
+    {
+        return [
+            'nullable',
+            'string',
+            Rule::in([OllamaConnectivity::TARGET_LOCAL, OllamaConnectivity::TARGET_REMOTE]),
+            function (string $attribute, mixed $value, \Closure $fail): void {
+                if ($value === OllamaConnectivity::TARGET_REMOTE && ! OllamaConnectivity::remoteConfigured()) {
+                    $fail('Ollama remoto no está configurado. Añade OLLAMA_REMOTE_URL al .env.');
+                }
+            },
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function articleAiModelValidation(): array
+    {
+        return ['nullable', 'string', 'max:120'];
+    }
+
     private function pipelineSettings(): array
     {
         $intervalMin = config('services.wordpress.schedule_interval_min_hours');
         $intervalMax = config('services.wordpress.schedule_interval_hours');
 
+        $remoteUrl = (string) config('services.ollama.remote_url', '');
+        $remoteHost = $remoteUrl !== '' ? (parse_url($remoteUrl, PHP_URL_HOST) ?: $remoteUrl) : null;
+
         return [
             'limit' => 5,
+            'article_ai_provider' => VideoCaptionAiProvider::OllamaLocal->value,
+            'article_ollama_target' => (string) config('services.scraper.article_ollama_target', OllamaConnectivity::TARGET_LOCAL),
+            'article_ai_model' => (string) config('services.scraper.article_ai_default_model'),
+            'ollama' => [
+                'remote_configured' => OllamaConnectivity::remoteConfigured(),
+                'remote_host' => $remoteHost,
+                'local_hint' => 'OLLAMA_URL (Docker → WSL)',
+            ],
             'limits' => [
                 'limit' => ['min' => 1, 'max' => 50],
             ],

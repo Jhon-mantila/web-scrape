@@ -3,21 +3,29 @@
 namespace App\SocialPublishing\Actions;
 
 use App\Models\SocialVideo;
-use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
-use App\ProcessScraping\Ai\Support\AiSettings;
+use App\SocialPublishing\Enums\VideoCaptionAiProvider;
 use App\SocialPublishing\Prompts\SocialTitlePrompt;
+use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
+use App\SocialPublishing\Support\VideoCaptionAiSettings;
 
 class GenerateSocialTitleAction
 {
     public function __construct(
-        private readonly TextGenerationClient $llm,
+        private readonly VideoCaptionAiClientFactory $clientFactory,
     ) {}
 
     public function execute(SocialVideo $video): SocialVideo
     {
-        $model = AiSettings::defaultModel();
+        $provider = $video->captionAiProvider();
 
-        $raw = $this->llm->generate(
+        if ($provider === VideoCaptionAiProvider::None) {
+            throw new \InvalidArgumentException('Este video está configurado sin IA para textos.');
+        }
+
+        $llm = $this->clientFactory->client($provider);
+        $model = VideoCaptionAiSettings::defaultModel($provider);
+
+        $raw = $llm->generate(
             SocialTitlePrompt::system(),
             SocialTitlePrompt::user($video->title, $video->notes),
             $model,

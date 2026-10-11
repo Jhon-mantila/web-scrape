@@ -7,6 +7,10 @@ import FilePicker from '@/Components/FilePicker.vue';
 
 const props = defineProps({
     video: Object,
+    captionAiOptions: {
+        type: Array,
+        default: () => [],
+    },
 });
 
 const thumbnailPreview = ref(null);
@@ -14,6 +18,7 @@ const thumbnailPreview = ref(null);
 const form = useForm({
     title: props.video.title,
     notes: props.video.notes || '',
+    caption_ai_provider: props.video.caption_ai_provider ?? 'ollama_local',
     thumbnail: null,
     publications: props.video.publications.map((p) => ({
         id: p.id,
@@ -22,6 +27,8 @@ const form = useForm({
         queued_publish_at: p.queued_publish_at ? p.queued_publish_at.slice(0, 16) : '',
     })),
 });
+
+const usesCaptionAi = computed(() => form.caption_ai_provider !== 'none');
 
 const displayThumbnail = computed(() => thumbnailPreview.value || props.video.thumbnail_url || null);
 
@@ -125,6 +132,7 @@ watch(
     (video) => {
         form.title = video.title;
         form.notes = video.notes || '';
+        form.caption_ai_provider = video.caption_ai_provider ?? 'ollama_local';
         form.thumbnail = null;
         thumbnailPreview.value = null;
         form.publications = video.publications.map((p) => ({
@@ -183,6 +191,7 @@ function save() {
         const payload = {
             title: data.title,
             notes: data.notes,
+            caption_ai_provider: data.caption_ai_provider,
             publications: data.publications,
             _method: 'put',
         };
@@ -428,7 +437,21 @@ function openSchedulePicker(event) {
                         </p>
                     </div>
                 </div>
-                <video :src="video.video_url" controls class="w-full rounded-2xl bg-black" />
+                <video
+                    v-if="video.video_url && !video.video_missing"
+                    :src="video.video_url"
+                    controls
+                    class="w-full rounded-2xl bg-black"
+                />
+                <div
+                    v-else
+                    class="flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-red-900/60 bg-red-950/20 px-4 text-center text-sm text-red-300"
+                >
+                    <p>El archivo de video no está en el servidor (subida incompleta).</p>
+                    <p class="text-xs text-slate-400">
+                        Elimina este registro y vuelve a subir el video en «Subir video».
+                    </p>
+                </div>
                 <div class="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm">
                     <p class="font-medium text-slate-200">Tamaño del archivo</p>
                     <p class="mt-1 text-slate-400">
@@ -450,12 +473,16 @@ function openSchedulePicker(event) {
                     </p>
                 </div>
                 <button
+                    v-if="usesCaptionAi"
                     type="button"
                     class="w-full rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium hover:bg-violet-500"
                     @click="generateCaptions"
                 >
                     Generar textos con IA
                 </button>
+                <p v-else class="text-center text-xs text-slate-500">
+                    IA desactivada para este video. Elige Ollama o DeepSeek abajo y guarda.
+                </p>
             </div>
 
             <form @submit.prevent="save" class="space-y-6">
@@ -463,6 +490,7 @@ function openSchedulePicker(event) {
                     <div class="mb-2 flex items-center justify-between gap-3">
                         <label class="text-sm text-slate-300">Título</label>
                         <button
+                            v-if="usesCaptionAi"
                             type="button"
                             class="text-sm text-violet-400 hover:text-violet-300"
                             @click="generateTitle"
@@ -474,8 +502,36 @@ function openSchedulePicker(event) {
                 </div>
 
                 <div>
+                    <label class="mb-2 block text-sm text-slate-300">Generación de textos</label>
+                    <select
+                        v-model="form.caption_ai_provider"
+                        class="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-sm"
+                    >
+                        <option
+                            v-for="opt in captionAiOptions"
+                            :key="opt.value"
+                            :value="opt.value"
+                            :disabled="opt.disabled"
+                        >
+                            {{ opt.label }}
+                        </option>
+                    </select>
+                    <p class="mt-1.5 text-xs text-slate-500">
+                        {{
+                            captionAiOptions.find((o) => o.value === form.caption_ai_provider)?.hint
+                                ?? video.caption_ai_provider_label
+                        }}
+                    </p>
+                </div>
+
+                <div>
                     <label class="mb-2 block text-sm text-slate-300">Notas (contexto para IA)</label>
-                    <textarea v-model="form.notes" rows="2" class="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5" />
+                    <textarea
+                        v-model="form.notes"
+                        rows="2"
+                        class="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5"
+                        :disabled="!usesCaptionAi"
+                    />
                 </div>
 
                 <div

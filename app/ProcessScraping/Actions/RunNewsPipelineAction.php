@@ -5,8 +5,9 @@ namespace App\ProcessScraping\Actions;
 use App\Models\News;
 use App\Scraper\Actions\ScrapeNewsAction;
 use App\Scraper\Actions\ScrapeNewsDetailsAction;
-use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
 use App\ProcessScraping\Ai\Support\AiSettings;
+use App\ProcessScraping\Support\ScraperArticleAiContext;
+use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
 use App\ProcessScraping\Images\Generators\ComfyUIClient;
 use App\ProcessScraping\Support\PipelineBatchResolver;
 use App\ProcessScraping\Support\PipelineRunState;
@@ -22,7 +23,7 @@ class RunNewsPipelineAction
         private readonly GenerateNewsAiArticleAction $generateAi,
         private readonly SendPostToWordpressAction $sendWordpress,
         private readonly ComfyUIClient $comfyui,
-        private readonly TextGenerationClient $llm,
+        private readonly VideoCaptionAiClientFactory $clientFactory,
         private readonly PipelineBatchResolver $batchResolver,
     ) {}
 
@@ -107,18 +108,28 @@ class RunNewsPipelineAction
             );
         }
 
-        $this->progressBegin($progressUserId, 'ai', 'Generando artículos con IA…');
-        $stepStarted = microtime(true);
-        $ai = $this->generateAi->execute($limit, $force, $includeRawHtml, $batchIds);
-        $timings['ai'] = microtime(true) - $stepStarted;
-        $this->progressFinish(
-            $progressUserId,
-            'ai',
-            "IA OK {$ai['success']}/{$ai['processed']}",
-        );
+        if (! ScraperArticleAiContext::usesAi()) {
+            $ai = [
+                'processed' => 0,
+                'success' => 0,
+                'failed' => 0,
+                'news_ids' => [],
+                'errors' => [],
+            ];
+            $timings['ai'] = 0.0;
+            $this->progressSkip($progressUserId, 'ai');
+        } else {
+            $this->progressBegin($progressUserId, 'ai', 'Generando artículos con IA…');
+            $stepStarted = microtime(true);
+            $ai = $this->generateAi->execute($limit, $force, $includeRawHtml, $batchIds);
+            $timings['ai'] = microtime(true) - $stepStarted;
+            $this->progressFinish(
+                $progressUserId,
+                'ai',
+                "IA OK {$ai['success']}/{$ai['processed']}",
+            );
 
-        if (AiSettings::shouldUnloadAfterGenerate() && $this->llm->supportsModelUnload() && $ai['processed'] > 0) {
-            $this->llm->unloadModels();
+            $this->unloadOllamaIfNeeded($ai['processed'] > 0);
         }
 
         if ($skipWordpress) {
@@ -157,6 +168,19 @@ class RunNewsPipelineAction
             'wordpress' => $wordpress,
             'timings' => $timings,
         ];
+    }
+
+    private function unloadOllamaIfNeeded(bool $didAiWork): void
+    {
+        if (! $didAiWork || ! AiSettings::shouldUnloadAfterGenerate()) {
+            return;
+        }
+
+        $llm = $this->clientFactory->client(ScraperArticleAiContext::get());
+
+        if ($llm->supportsModelUnload()) {
+            $llm->unloadModels();
+        }
     }
 
     private function progressBegin(?int $userId, string $step, string $message): void

@@ -6,6 +6,7 @@ use App\Models\ScheduledTask;
 use App\Scheduling\Contracts\ScheduledTaskHandler;
 use App\Scheduling\Support\ScheduledTaskTiming;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class ScheduledTaskRunner
 {
@@ -77,8 +78,22 @@ class ScheduledTaskRunner
             $task = $this->ensureTaskRow($handler);
 
             if (! $this->timing->shouldRun($task)) {
+                Log::debug('scheduler_task: no toca aún', [
+                    'task_key' => $task->task_key,
+                    'enabled' => $task->enabled,
+                    'frequency' => $task->frequency,
+                    'timezone' => $task->timezone,
+                    'last_run_at' => $task->last_run_at?->toIso8601String(),
+                    'next_run_hint' => $this->timing->nextRunHint($task),
+                ]);
+
                 continue;
             }
+
+            Log::info('scheduler_task: ejecutando', [
+                'task_key' => $task->task_key,
+                'frequency' => $task->frequency,
+            ]);
 
             $this->runTask($handler, $task);
             $ran++;
@@ -109,6 +124,11 @@ class ScheduledTaskRunner
     private function runTask(ScheduledTaskHandler $handler, ScheduledTask $task): array
     {
         $summary = $handler->run();
+
+        Log::info('scheduler_task: terminada', [
+            'task_key' => $task->task_key,
+            'summary' => $summary,
+        ]);
 
         $task->update([
             'last_run_at' => now(),

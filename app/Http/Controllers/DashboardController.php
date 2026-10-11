@@ -23,6 +23,7 @@ class DashboardController extends Controller
         $stats = [
             'total_videos' => $videos->count(),
             'pending' => 0,
+            'queued' => 0,
             'scheduled' => 0,
             'published' => 0,
             'failed' => 0,
@@ -54,6 +55,7 @@ class DashboardController extends Controller
             PublicationStatus::Failed => $stats['failed']++,
             PublicationStatus::Publishing => $stats['publishing']++,
             PublicationStatus::Unavailable => $stats['unavailable']++,
+            PublicationStatus::Queued => $stats['queued']++,
             PublicationStatus::Draft, PublicationStatus::CaptionReady => $stats['pending']++,
         };
     }

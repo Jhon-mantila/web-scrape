@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\ProcessScraping\Actions\GenerateNewsAiArticleAction;
+use App\ProcessScraping\Support\ScraperArticleAiContext;
 use Illuminate\Console\Command;
 
 class GenerateNewsAiArticles extends Command
@@ -19,11 +20,17 @@ class GenerateNewsAiArticles extends Command
     {
         $limit = max(1, (int) $this->option('limit'));
 
-        $summary = $action->execute(
-            $limit,
-            (bool) $this->option('force'),
-            (bool) $this->option('include-raw-html'),
-        );
+        ScraperArticleAiContext::applyGlobalAiProviderFallback();
+
+        try {
+            $summary = $action->execute(
+                $limit,
+                (bool) $this->option('force'),
+                (bool) $this->option('include-raw-html'),
+            );
+        } finally {
+            ScraperArticleAiContext::reset();
+        }
 
         $this->info('Listo.');
         $this->line('Procesadas: '.$summary['processed']);

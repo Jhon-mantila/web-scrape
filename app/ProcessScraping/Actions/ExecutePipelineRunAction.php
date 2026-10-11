@@ -3,6 +3,7 @@
 namespace App\ProcessScraping\Actions;
 
 use App\ProcessScraping\Support\BackgroundRunQueue;
+use App\ProcessScraping\Support\ScraperArticleAiContext;
 use App\ProcessScraping\Support\PipelineSummaryFormatter;
 use App\SendWordpress\Actions\SendPostToWordpressAction;
 use Illuminate\Support\Facades\Log;
@@ -45,17 +46,23 @@ class ExecutePipelineRunAction
                 return;
             }
 
-            $summary = $this->pipeline->execute(
-                $limit,
-                $mode,
-                (bool) ($options['force'] ?? false),
-                (bool) ($options['include_raw_html'] ?? false),
-                (bool) ($options['skip_scrape'] ?? false),
-                (bool) ($options['skip_research'] ?? false),
-                (bool) ($options['skip_generate'] ?? false),
-                ! ($options['send_wordpress'] ?? false),
-                $userId,
-            );
+            ScraperArticleAiContext::applyFromPipelineOptions($options);
+
+            try {
+                $summary = $this->pipeline->execute(
+                    $limit,
+                    $mode,
+                    (bool) ($options['force'] ?? false),
+                    (bool) ($options['include_raw_html'] ?? false),
+                    (bool) ($options['skip_scrape'] ?? false),
+                    (bool) ($options['skip_research'] ?? false),
+                    (bool) ($options['skip_generate'] ?? false),
+                    ! ($options['send_wordpress'] ?? false),
+                    $userId,
+                );
+            } finally {
+                ScraperArticleAiContext::reset();
+            }
 
             $message = $this->summaryFormatter->formatPipeline($summary, $options);
 

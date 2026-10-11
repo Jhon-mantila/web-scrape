@@ -5,6 +5,7 @@ use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FacebookOAuthController;
 use App\Http\Controllers\LinkedInOAuthController;
+use App\Http\Controllers\QueueMonitorController;
 use App\Http\Controllers\ScheduledTasksController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SocialVideoController;
@@ -28,6 +29,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
 
     Route::get('/scraper', [ScraperController::class, 'index'])->name('scraper.index');
+    Route::get('/scraper/ollama-models', [ScraperController::class, 'ollamaModels'])->name('scraper.ollama-models');
     Route::get('/scraper/news/{news}/preview', [ScraperController::class, 'preview'])->name('scraper.preview');
     Route::post('/scraper/news/{news}/regenerate-ai', [ScraperController::class, 'regenerateAi'])->name('scraper.regenerate-ai');
     Route::post('/scraper/sync-wordpress', [ScraperController::class, 'syncWordpressStatus'])->name('scraper.sync-wordpress');
@@ -45,6 +47,10 @@ Route::middleware('auth')->group(function () {
     Route::post('/articles/sync', [WordpressArticleController::class, 'sync'])->name('articles.sync');
     Route::post('/articles/{post}/generate-caption', [WordpressArticleController::class, 'generateCaption'])
         ->name('articles.generate-caption');
+    Route::post('/articles/generate-captions-batch', [WordpressArticleController::class, 'generateCaptionsBatch'])
+        ->name('articles.generate-captions-batch');
+    Route::post('/articles/batch-plan', [WordpressArticleController::class, 'batchPlan'])
+        ->name('articles.batch-plan');
     Route::post('/articles/{post}/publish', [WordpressArticleController::class, 'publish'])->name('articles.publish');
     Route::post('/articles/{post}/publish-batch', [WordpressArticleController::class, 'publishBatch'])
         ->name('articles.publish-batch');
@@ -59,6 +65,16 @@ Route::middleware('auth')->group(function () {
     Route::post('/settings/scheduler/{taskKey}/run-now', [ScheduledTasksController::class, 'runNow'])
         ->where('taskKey', '[a-z0-9_]+')
         ->name('settings.scheduler.run-now');
+
+    Route::get('/settings/queue', [QueueMonitorController::class, 'index'])->name('settings.queue.index');
+    Route::post('/settings/queue/failed/retry-all', [QueueMonitorController::class, 'retryAllFailed'])
+        ->name('settings.queue.failed.retry-all');
+    Route::delete('/settings/queue/failed/flush', [QueueMonitorController::class, 'flushFailed'])
+        ->name('settings.queue.failed.flush');
+    Route::post('/settings/queue/failed/{uuid}/retry', [QueueMonitorController::class, 'retryFailed'])
+        ->name('settings.queue.failed.retry');
+    Route::delete('/settings/queue/failed/{uuid}', [QueueMonitorController::class, 'destroyFailed'])
+        ->name('settings.queue.failed.destroy');
 
     Route::get('/auth/youtube/redirect', [YouTubeOAuthController::class, 'redirect'])->name('youtube.oauth.redirect');
     Route::get('/auth/youtube/callback', [YouTubeOAuthController::class, 'callback'])->name('youtube.oauth.callback');

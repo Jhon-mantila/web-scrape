@@ -50,10 +50,16 @@ return [
 
     'ollama' => [
         'url' => env('OLLAMA_URL', 'http://localhost:11434'),
+        'remote_url' => env('OLLAMA_REMOTE_URL'),
         'model' => env('OLLAMA_MODEL', 'qwen3:14b'),
         'model_premium' => env('OLLAMA_MODEL_PREMIUM', 'qwen3:30b-a3b'),
         'num_ctx' => (int) env('OLLAMA_NUM_CTX', 16384),
         'unload_after_generate' => filter_var(env('OLLAMA_UNLOAD_AFTER_GENERATE', true), FILTER_VALIDATE_BOOLEAN),
+    ],
+
+    'scraper' => [
+        'article_ai_default_model' => env('SCRAPER_ARTICLE_AI_MODEL', env('OLLAMA_MODEL', 'qwen3:14b')),
+        'article_ollama_target' => env('SCRAPER_ARTICLE_OLLAMA_TARGET', 'local'),
     ],
 
     'deepseek' => [

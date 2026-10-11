@@ -26,8 +26,13 @@ const props = defineProps({
             scheduled: 0,
             failed: 0,
             publishing: 0,
+            queued: 0,
             pending_slots: 0,
         }),
+    },
+    captionAiOptions: {
+        type: Array,
+        default: () => [],
     },
     sync: {
         type: Object,
@@ -56,11 +61,27 @@ const publishModal = ref(null);
 const publishTarget = ref(null);
 const publishContext = ref('single');
 const searchQuery = ref(props.filters.q || '');
-const publishMode = ref('now');
+const deliveryMode = ref('now');
+const captionAiProvider = ref('ollama_local');
 const messageSource = ref('excerpt');
 const excerptText = ref('');
 const aiCaption = ref('');
 const generatingAi = ref(false);
+const selectedPostIds = ref([]);
+const batchModalOpen = ref(false);
+const batchDeliveryMode = ref('queue');
+const batchQueuedAt = ref('');
+const batchFacebookScheduledAt = ref('');
+const batchCaptionAiProvider = ref('ollama_local');
+const batchTextMode = ref('excerpt');
+const batchMessages = ref({});
+const batchGenerating = ref(false);
+const batchSubmitting = ref(false);
+const batchPlatforms = ref({
+    facebook: true,
+    linkedin: true,
+    linkedin_jessika: true,
+});
 const generatingLinkedinKey = ref(null);
 const linkedinDrafts = ref({
     linkedin: { source: 'excerpt', excerpt: '', ai: '', message: '' },
@@ -72,6 +93,8 @@ const publishForm = useForm({
     platform: '',
     message: '',
     scheduled_at: '',
+    queued_publish_at: '',
+    delivery_mode: 'now',
 });
 
 const batchForm = useForm({
@@ -87,7 +110,8 @@ const syncBatchMax = computed(() =>
 const statCards = computed(() => [
     { key: 'total_articles', label: 'En lista', value: props.stats.total_articles, class: 'text-white' },
     { key: 'pending_slots', label: 'Pend. redes', value: props.stats.pending_slots, class: 'text-amber-300' },
-    { key: 'scheduled', label: 'Programados', value: props.stats.scheduled, class: 'text-sky-300' },
+    { key: 'queued', label: 'En cola (app)', value: props.stats.queued, class: 'text-cyan-300' },
+    { key: 'scheduled', label: 'Programados (FB)', value: props.stats.scheduled, class: 'text-sky-300' },
     { key: 'published', label: 'Publicados', value: props.stats.published, class: 'text-emerald-300' },
     { key: 'failed', label: 'Error', value: props.stats.failed, class: 'text-red-400' },
     { key: 'publishing', label: 'Publicando', value: props.stats.publishing, class: 'text-violet-300' },
@@ -111,15 +135,188 @@ const submitLabel = computed(() => {
             return 'Publicando…';
         }
 
-        return publishMode.value === 'schedule' ? 'Programando…' : 'Publicando…';
+        return deliveryMode.value === 'queue' ? 'Encolando…' : 'Publicando…';
     }
 
     if (isLinkedinBoth.value) {
-        return 'Publicar ambos';
+        return deliveryMode.value === 'queue' ? 'Encolar ambos' : 'Publicar ambos';
     }
 
-    return publishMode.value === 'schedule' ? 'Programar' : 'Publicar ahora';
+    return deliveryMode.value === 'queue' ? 'Encolar en la app' : 'Publicar ahora';
 });
+
+const selectedPosts = computed(() =>
+    props.posts.data.filter((post) => selectedPostIds.value.includes(post.id)),
+);
+
+const siteFacebookPlatform = computed(() => {
+    const post = props.posts.data.find((item) => item.facebook_platform);
+
+    return post?.facebook_platform ?? null;
+});
+
+function togglePostSelection(id) {
+    if (selectedPostIds.value.includes(id)) {
+        selectedPostIds.value = selectedPostIds.value.filter((item) => item !== id);
+    } else {
+        selectedPostIds.value = [...selectedPostIds.value, id];
+    }
+}
+
+function selectAllVisiblePosts() {
+    selectedPostIds.value = props.posts.data.map((post) => post.id);
+}
+
+function clearPostSelection() {
+    selectedPostIds.value = [];
+}
+
+function openBatchModal() {
+    if (selectedPostIds.value.length === 0) {
+        return;
+    }
+
+    batchModalOpen.value = true;
+    batchDeliveryMode.value = 'queue';
+    batchQueuedAt.value = '';
+    batchFacebookScheduledAt.value = '';
+    batchTextMode.value = 'excerpt';
+    batchMessages.value = {};
+    batchPlatforms.value = {
+        facebook: true,
+        linkedin: true,
+        linkedin_jessika: true,
+    };
+}
+
+function closeBatchModal() {
+    batchModalOpen.value = false;
+}
+
+function batchPlatformKeys() {
+    const keys = [];
+
+    if (batchPlatforms.value.facebook && siteFacebookPlatform.value) {
+        keys.push(siteFacebookPlatform.value);
+    }
+
+    if (batchPlatforms.value.linkedin) {
+        keys.push('linkedin');
+    }
+
+    if (batchPlatforms.value.linkedin_jessika) {
+        keys.push('linkedin_jessika');
+    }
+
+    return keys;
+}
+
+function defaultMessageForPost(post) {
+    return post.excerpt || post.title;
+}
+
+function batchMessage(postId, platform) {
+    if (!batchMessages.value[postId]) {
+        batchMessages.value[postId] = {};
+    }
+
+    return batchMessages.value[postId][platform] ?? '';
+}
+
+function setBatchMessage(postId, platform, value) {
+    if (!batchMessages.value[postId]) {
+        batchMessages.value[postId] = {};
+    }
+
+    batchMessages.value[postId][platform] = value;
+}
+
+async function generateBatchCaptions() {
+    const platforms = batchPlatformKeys();
+
+    if (platforms.length === 0 || selectedPostIds.value.length === 0) {
+        return;
+    }
+
+    if (batchCaptionAiProvider.value === 'none') {
+        window.alert('Elige Ollama local o DeepSeek para generar textos.');
+
+        return;
+    }
+
+    batchGenerating.value = true;
+
+    try {
+        const { data } = await axios.post(
+            route('articles.generate-captions-batch'),
+            {
+                post_ids: selectedPostIds.value,
+                platforms,
+                caption_ai_provider: batchCaptionAiProvider.value,
+            },
+            { headers: csrfHeaders() },
+        );
+
+        batchTextMode.value = 'custom';
+
+        Object.entries(data.captions ?? {}).forEach(([postId, platformMap]) => {
+            batchMessages.value[postId] = {
+                ...(batchMessages.value[postId] ?? {}),
+                ...platformMap,
+            };
+        });
+    } catch (error) {
+        window.alert(error.response?.data?.message || 'No se pudieron generar los textos.');
+    } finally {
+        batchGenerating.value = false;
+    }
+}
+
+function submitBatch() {
+    const platforms = batchPlatformKeys();
+
+    if (platforms.length === 0) {
+        return;
+    }
+
+    const messages = {};
+
+    selectedPosts.value.forEach((post) => {
+        messages[post.id] = {};
+
+        platforms.forEach((platform) => {
+            const custom = batchMessages.value[post.id]?.[platform];
+
+            messages[post.id][platform] = batchTextMode.value === 'excerpt'
+                ? defaultMessageForPost(post)
+                : (custom || defaultMessageForPost(post));
+        });
+    });
+
+    batchSubmitting.value = true;
+
+    router.post(
+        route('articles.batch-plan'),
+        {
+            post_ids: selectedPostIds.value,
+            platforms,
+            mode: batchDeliveryMode.value,
+            queued_publish_at: batchDeliveryMode.value === 'queue' ? batchQueuedAt.value : null,
+            facebook_scheduled_at: batchFacebookScheduledAt.value || null,
+            messages,
+        },
+        {
+            preserveScroll: true,
+            onSuccess: () => {
+                closeBatchModal();
+                clearPostSelection();
+            },
+            onFinish: () => {
+                batchSubmitting.value = false;
+            },
+        },
+    );
+}
 
 function formatDate(iso) {
     if (!iso) {
@@ -183,13 +380,15 @@ function openPublish(post, platform) {
     publishModal.value = post;
     publishContext.value = 'single';
     publishTarget.value = platform;
-    publishMode.value = 'now';
+    deliveryMode.value = 'now';
     messageSource.value = 'excerpt';
     excerptText.value = post.excerpt || post.title;
     aiCaption.value = '';
     publishForm.platform = platform.platform;
     publishForm.message = excerptText.value;
     publishForm.scheduled_at = '';
+    publishForm.queued_publish_at = '';
+    publishForm.delivery_mode = 'now';
 }
 
 function openLinkedinBoth(post) {
@@ -198,7 +397,8 @@ function openLinkedinBoth(post) {
     publishModal.value = post;
     publishContext.value = 'linkedin_both';
     publishTarget.value = null;
-    publishMode.value = 'now';
+    deliveryMode.value = 'now';
+    publishForm.queued_publish_at = '';
     linkedinDrafts.value = {
         linkedin: linkedinDraftTemplate(excerpt),
         linkedin_jessika: linkedinDraftTemplate(excerpt),
@@ -209,7 +409,7 @@ function closePublish() {
     publishModal.value = null;
     publishTarget.value = null;
     publishContext.value = 'single';
-    publishMode.value = 'now';
+    deliveryMode.value = 'now';
     messageSource.value = 'excerpt';
     excerptText.value = '';
     aiCaption.value = '';
@@ -249,7 +449,10 @@ async function generateAiCaption() {
     try {
         const { data } = await axios.post(
             route('articles.generate-caption', publishModal.value.id),
-            { platform: publishTarget.value.platform },
+            {
+                platform: publishTarget.value.platform,
+                caption_ai_provider: captionAiProvider.value,
+            },
             { headers: csrfHeaders() },
         );
 
@@ -293,7 +496,7 @@ async function generateLinkedinAi(key) {
     try {
         const { data } = await axios.post(
             route('articles.generate-caption', publishModal.value.id),
-            { platform: key },
+            { platform: key, caption_ai_provider: captionAiProvider.value },
             { headers: csrfHeaders() },
         );
 
@@ -318,7 +521,7 @@ async function generateLinkedinBothAi() {
     try {
         const { data } = await axios.post(
             route('articles.generate-caption', publishModal.value.id),
-            { platforms: LINKEDIN_PLATFORMS },
+            { platforms: LINKEDIN_PLATFORMS, caption_ai_provider: captionAiProvider.value },
             { headers: csrfHeaders() },
         );
 
@@ -350,34 +553,53 @@ function submitPublish() {
     if (isLinkedinBoth.value) {
         LINKEDIN_PLATFORMS.forEach((key) => syncLinkedinDraft(key));
 
-        const publications = linkedinPlatforms(publishModal.value)
+        const platforms = linkedinPlatforms(publishModal.value)
             .filter((platform) => platform.can_publish)
-            .map((platform) => ({
-                platform: platform.platform,
-                message: linkedinDrafts.value[platform.platform].message,
-            }));
+            .map((platform) => platform.platform);
 
-        if (publications.length === 0) {
+        if (platforms.length === 0) {
             return;
         }
 
-        batchForm.publications = publications;
-        batchForm.post(route('articles.publish-batch', publishModal.value.id), {
-            onSuccess: () => closePublish(),
+        if (deliveryMode.value === 'queue' && !publishForm.queued_publish_at) {
+            return;
+        }
+
+        const messages = {
+            [publishModal.value.id]: {},
+        };
+
+        platforms.forEach((key) => {
+            messages[publishModal.value.id][key] = linkedinDrafts.value[key].message;
         });
+
+        router.post(
+            route('articles.batch-plan'),
+            {
+                post_ids: [publishModal.value.id],
+                platforms,
+                mode: deliveryMode.value,
+                queued_publish_at: deliveryMode.value === 'queue' ? publishForm.queued_publish_at : null,
+                messages,
+            },
+            { onSuccess: () => closePublish() },
+        );
 
         return;
     }
 
-    if (publishMode.value === 'schedule' && !publishForm.scheduled_at) {
+    if (deliveryMode.value === 'queue' && !publishForm.queued_publish_at) {
         return;
     }
 
     syncActiveMessageBuffer();
 
+    publishForm.delivery_mode = deliveryMode.value;
+
     publishForm.transform((data) => ({
         ...data,
-        scheduled_at: publishMode.value === 'schedule' ? data.scheduled_at : null,
+        delivery_mode: deliveryMode.value,
+        queued_publish_at: deliveryMode.value === 'queue' ? data.queued_publish_at : null,
     })).post(route('articles.publish', publishModal.value.id), {
         onSuccess: () => closePublish(),
     });
@@ -562,12 +784,47 @@ function deleteFromFacebook(post, platform) {
         </div>
 
         <div v-else class="space-y-3">
+            <div
+                v-if="selectedPostIds.length > 0"
+                class="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-violet-700/50 bg-violet-950/40 px-3 py-2"
+            >
+                <span class="text-sm text-violet-200">{{ selectedPostIds.length }} seleccionado(s)</span>
+                <button
+                    type="button"
+                    class="rounded-lg bg-violet-600 px-3 py-1.5 text-sm hover:bg-violet-500"
+                    @click="openBatchModal"
+                >
+                    Programar / publicar…
+                </button>
+                <button
+                    type="button"
+                    class="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+                    @click="clearPostSelection"
+                >
+                    Limpiar
+                </button>
+            </div>
+
+            <div class="flex flex-wrap gap-2 text-xs text-slate-500">
+                <button type="button" class="text-violet-400 hover:underline" @click="selectAllVisiblePosts">
+                    Seleccionar página
+                </button>
+            </div>
+
             <article
                 v-for="post in posts.data"
                 :key="post.id"
                 class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4"
             >
                 <div class="flex flex-wrap gap-4">
+                    <label class="flex items-start pt-1">
+                        <input
+                            type="checkbox"
+                            class="mt-1 rounded border-slate-600 bg-slate-950"
+                            :checked="selectedPostIds.includes(post.id)"
+                            @change="togglePostSelection(post.id)"
+                        />
+                    </label>
                     <img
                         v-if="post.featured_image_url"
                         :src="post.featured_image_url"
@@ -622,7 +879,14 @@ function deleteFromFacebook(post, platform) {
                                 :key="`schedule-${platform.platform}`"
                                 class="text-xs text-sky-300"
                             >
-                                {{ platform.platform_label }} · Programado: {{ formatDate(platform.scheduled_at) }}
+                                {{ platform.platform_label }} · Programado en Facebook: {{ formatDate(platform.scheduled_at) }}
+                            </p>
+                            <p
+                                v-for="platform in post.platforms.filter((item) => item.queued_publish_at && (item.status === 'queued' || new Date(item.queued_publish_at) > new Date()))"
+                                :key="`queue-${platform.platform}`"
+                                class="text-xs text-cyan-300"
+                            >
+                                {{ platform.platform_label }} · Cola app: {{ formatDate(platform.queued_publish_at) }}
                             </p>
                         </div>
 
@@ -715,7 +979,7 @@ function deleteFromFacebook(post, platform) {
                         <button
                             type="button"
                             class="rounded-lg border border-violet-500/50 px-3 py-1.5 text-xs text-violet-300 hover:bg-violet-950/40 disabled:opacity-50"
-                            :disabled="generatingAi"
+                            :disabled="generatingAi || captionAiProvider === 'none'"
                             @click="generateLinkedinBothAi"
                         >
                             {{ generatingAi ? 'Generando ambos…' : 'Generar ambos con IA' }}
@@ -751,7 +1015,7 @@ function deleteFromFacebook(post, platform) {
                                 <button
                                     type="button"
                                     class="rounded-lg border border-violet-500/50 px-2 py-0.5 text-xs text-violet-300 hover:bg-violet-950/40 disabled:opacity-50"
-                                    :disabled="generatingLinkedinKey === key"
+                                    :disabled="generatingLinkedinKey === key || captionAiProvider === 'none'"
                                     @click="generateLinkedinAi(key)"
                                 >
                                     {{ generatingLinkedinKey === key ? 'Generando…' : 'Generar IA' }}
@@ -766,7 +1030,27 @@ function deleteFromFacebook(post, platform) {
                         </div>
                     </template>
 
-                    <div v-else-if="showAiControls" class="flex flex-wrap items-center gap-3 text-sm text-slate-300">
+                    <div v-if="showAiControls || isLinkedinBoth" class="space-y-2 rounded-xl border border-slate-800 p-3">
+                        <label class="block text-xs text-slate-400">IA para el texto</label>
+                        <select
+                            v-model="captionAiProvider"
+                            class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+                        >
+                            <option
+                                v-for="opt in captionAiOptions"
+                                :key="opt.value"
+                                :value="opt.value"
+                                :disabled="opt.disabled"
+                            >
+                                {{ opt.label }}
+                            </option>
+                        </select>
+                        <p class="text-xs text-slate-500">
+                            {{ captionAiOptions.find((o) => o.value === captionAiProvider)?.hint }}
+                        </p>
+                    </div>
+
+                    <div v-if="showAiControls" class="flex flex-wrap items-center gap-3 text-sm text-slate-300">
                         <span class="text-slate-400">Texto:</span>
                         <label class="flex cursor-pointer items-center gap-1.5">
                             <input
@@ -786,15 +1070,15 @@ function deleteFromFacebook(post, platform) {
                                 class="rounded-full border-slate-600 bg-slate-950"
                                 @change="selectMessageSource('ai')"
                             />
-                            IA
+                            IA generada
                         </label>
                         <button
                             type="button"
                             class="rounded-lg border border-violet-500/50 px-2.5 py-1 text-xs text-violet-300 hover:bg-violet-950/40 disabled:opacity-50"
-                            :disabled="generatingAi"
+                            :disabled="generatingAi || captionAiProvider === 'none'"
                             @click="generateAiCaption"
                         >
-                            {{ generatingAi ? 'Generando…' : 'Generar con IA' }}
+                            {{ generatingAi ? 'Generando…' : 'Generar y ver texto' }}
                         </button>
                     </div>
 
@@ -809,32 +1093,53 @@ function deleteFromFacebook(post, platform) {
                         />
                     </div>
 
-                    <div v-if="isFacebookTarget" class="space-y-3">
-                        <p class="text-sm text-slate-300">Facebook</p>
+                    <div class="space-y-3 rounded-xl border border-slate-800 p-4">
+                        <p class="text-sm font-medium text-slate-200">Cuándo enviar</p>
                         <div class="flex flex-wrap gap-4 text-sm text-slate-300">
                             <label class="flex items-center gap-2">
-                                <input v-model="publishMode" type="radio" value="now" class="rounded-full border-slate-600 bg-slate-950" />
+                                <input v-model="deliveryMode" type="radio" value="now" class="rounded-full border-slate-600 bg-slate-950" />
                                 Publicar ahora
                             </label>
                             <label class="flex items-center gap-2">
-                                <input v-model="publishMode" type="radio" value="schedule" class="rounded-full border-slate-600 bg-slate-950" />
-                                Programar
+                                <input v-model="deliveryMode" type="radio" value="queue" class="rounded-full border-slate-600 bg-slate-950" />
+                                Enviar automáticamente (app)
                             </label>
                         </div>
-                        <div v-if="publishMode === 'schedule'" class="schedule-datetime-wrap relative">
+                        <div v-if="deliveryMode === 'queue'" class="schedule-datetime-wrap relative">
+                            <label class="mb-1 block text-xs text-slate-400">Fecha cola app (Facebook y LinkedIn)</label>
+                            <input
+                                v-model="publishForm.queued_publish_at"
+                                type="datetime-local"
+                                class="schedule-datetime-input w-full rounded-xl border border-sky-800/40 bg-slate-950 px-4 py-2.5 text-sm"
+                            />
+                            <button
+                                type="button"
+                                class="schedule-datetime-trigger absolute bottom-0 right-0 px-3 py-2.5 text-slate-400 hover:text-white"
+                                @click="openSchedulePicker"
+                            >
+                                📅
+                            </button>
+                            <p class="mt-1 text-xs text-slate-500">
+                                Activa «Cola de artículos» en Configuración → Planificador.
+                            </p>
+                        </div>
+                        <div v-if="isFacebookTarget" class="schedule-datetime-wrap relative">
+                            <label class="mb-1 block text-xs text-slate-400">
+                                Programar en Facebook (Meta)
+                                <span class="text-slate-600"> · opcional, aparte de la cola</span>
+                            </label>
                             <input
                                 v-model="publishForm.scheduled_at"
                                 type="datetime-local"
                                 class="schedule-datetime-input w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm"
                             />
-                            <button
-                                type="button"
-                                class="schedule-datetime-trigger absolute inset-y-0 right-0 px-3 text-slate-400 hover:text-white"
-                                @click="openSchedulePicker"
-                            >
-                                📅
-                            </button>
+                            <p class="mt-1 text-xs text-slate-500">
+                                Hora en la que Meta hará visible el post (independiente de la cola de la app).
+                            </p>
                         </div>
+                        <p v-else-if="isLinkedinBoth || isLinkedinSingle" class="text-xs text-slate-500">
+                            LinkedIn no tiene planificador nativo; usa la cola de la app.
+                        </p>
                     </div>
 
                     <div class="flex justify-end gap-2">
@@ -848,12 +1153,133 @@ function deleteFromFacebook(post, platform) {
                         <button
                             type="submit"
                             class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium hover:bg-violet-500 disabled:opacity-50"
-                            :disabled="publishForm.processing || batchForm.processing || (publishMode === 'schedule' && !publishForm.scheduled_at && !isLinkedinBoth)"
+                            :disabled="publishForm.processing || batchForm.processing || (deliveryMode === 'queue' && !publishForm.queued_publish_at)"
                         >
                             {{ submitLabel }}
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <div
+            v-if="batchModalOpen"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            @click.self="closeBatchModal"
+        >
+            <div class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
+                <h3 class="text-lg font-semibold">Varios artículos</h3>
+                <p class="mt-1 text-sm text-slate-400">{{ selectedPostIds.length }} artículo(s) · sitio {{ filters.site }}</p>
+
+                <div class="mt-4 space-y-4">
+                    <div>
+                        <p class="mb-2 text-sm text-slate-300">Redes</p>
+                        <div class="flex flex-wrap gap-3 text-sm">
+                            <label v-if="siteFacebookPlatform" class="flex items-center gap-2">
+                                <input v-model="batchPlatforms.facebook" type="checkbox" class="rounded border-slate-600 bg-slate-950" />
+                                Facebook
+                            </label>
+                            <label class="flex items-center gap-2">
+                                <input v-model="batchPlatforms.linkedin" type="checkbox" class="rounded border-slate-600 bg-slate-950" />
+                                LinkedIn Jhon
+                            </label>
+                            <label class="flex items-center gap-2">
+                                <input v-model="batchPlatforms.linkedin_jessika" type="checkbox" class="rounded border-slate-600 bg-slate-950" />
+                                LinkedIn Jessika
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="grid gap-3 sm:grid-cols-2">
+                        <div>
+                            <p class="mb-2 text-sm text-slate-300">Acción</p>
+                            <label class="mb-2 flex items-center gap-2 text-sm">
+                                <input v-model="batchDeliveryMode" type="radio" value="queue" class="rounded-full" />
+                                Encolar en la app
+                            </label>
+                            <label class="flex items-center gap-2 text-sm">
+                                <input v-model="batchDeliveryMode" type="radio" value="now" class="rounded-full" />
+                                Publicar ahora
+                            </label>
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-xs text-slate-400">Enviar automáticamente (app)</label>
+                            <input
+                                v-model="batchQueuedAt"
+                                type="datetime-local"
+                                class="w-full rounded-xl border border-sky-800/40 bg-slate-950 px-3 py-2 text-sm"
+                                :disabled="batchDeliveryMode !== 'queue'"
+                            />
+                            <label class="mb-1 mt-3 block text-xs text-slate-400">Programar en Facebook (Meta)</label>
+                            <input
+                                v-model="batchFacebookScheduledAt"
+                                type="datetime-local"
+                                class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="rounded-xl border border-slate-800 p-3">
+                        <label class="mb-2 block text-xs text-slate-400">Texto</label>
+                        <div class="mb-3 flex flex-wrap gap-3 text-sm">
+                            <label class="flex items-center gap-2">
+                                <input v-model="batchTextMode" type="radio" value="excerpt" class="rounded-full" />
+                                Extracto por defecto
+                            </label>
+                            <label class="flex items-center gap-2">
+                                <input v-model="batchTextMode" type="radio" value="custom" class="rounded-full" />
+                                Personalizado / IA
+                            </label>
+                        </div>
+                        <label class="mb-1 block text-xs text-slate-400">Proveedor IA</label>
+                        <select v-model="batchCaptionAiProvider" class="mb-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+                            <option v-for="opt in captionAiOptions" :key="opt.value" :value="opt.value" :disabled="opt.disabled">
+                                {{ opt.label }}
+                            </option>
+                        </select>
+                        <button
+                            type="button"
+                            class="rounded-lg border border-violet-500/50 px-3 py-1.5 text-sm text-violet-300 hover:bg-violet-950/40 disabled:opacity-50"
+                            :disabled="batchGenerating || batchCaptionAiProvider === 'none'"
+                            @click="generateBatchCaptions"
+                        >
+                            {{ batchGenerating ? 'Generando…' : 'Generar textos con IA (selección)' }}
+                        </button>
+                    </div>
+
+                    <div v-if="batchTextMode === 'custom'" class="max-h-64 space-y-3 overflow-y-auto">
+                        <div
+                            v-for="post in selectedPosts"
+                            :key="post.id"
+                            class="rounded-lg border border-slate-800 p-3"
+                        >
+                            <p class="mb-2 text-sm font-medium text-slate-200">{{ post.title }}</p>
+                            <div v-for="platform in batchPlatformKeys()" :key="`${post.id}-${platform}`" class="mb-2">
+                                <label class="mb-1 block text-xs text-slate-500">{{ platform }}</label>
+                                <textarea
+                                    :value="batchMessage(post.id, platform) || defaultMessageForPost(post)"
+                                    rows="3"
+                                    class="w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs"
+                                    @input="setBatchMessage(post.id, platform, $event.target.value)"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end gap-2">
+                        <button type="button" class="rounded-lg border border-slate-600 px-4 py-2 text-sm" @click="closeBatchModal">
+                            Cancelar
+                        </button>
+                        <button
+                            type="button"
+                            class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium hover:bg-violet-500 disabled:opacity-50"
+                            :disabled="batchSubmitting || (batchDeliveryMode === 'queue' && !batchQueuedAt)"
+                            @click="submitBatch"
+                        >
+                            {{ batchSubmitting ? 'Guardando…' : batchDeliveryMode === 'queue' ? 'Encolar' : 'Publicar ahora' }}
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </AppLayout>

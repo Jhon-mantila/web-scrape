@@ -71,6 +71,7 @@ class PublishSocialArticleAction
                 'status' => $isScheduled ? PublicationStatus::Scheduled : PublicationStatus::Published,
                 'published_at' => now(),
                 'scheduled_at' => $scheduledAt,
+                'queued_publish_at' => null,
                 'external_id' => $result->externalId,
                 'external_url' => $result->externalUrl,
                 'api_response' => $result->rawResponse,

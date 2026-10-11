@@ -16,6 +16,7 @@ class WordpressArticleStats
      *     scheduled: int,
      *     failed: int,
      *     publishing: int,
+     *     queued: int,
      *     pending_slots: int
      * }
      */
@@ -41,6 +42,7 @@ class WordpressArticleStats
             'scheduled' => (clone $publicationsQuery)->where('status', PublicationStatus::Scheduled)->count(),
             'failed' => (clone $publicationsQuery)->where('status', PublicationStatus::Failed)->count(),
             'publishing' => (clone $publicationsQuery)->where('status', PublicationStatus::Publishing)->count(),
+            'queued' => (clone $publicationsQuery)->where('status', PublicationStatus::Queued)->count(),
             'pending_slots' => 0,
         ];
 

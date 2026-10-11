@@ -7,9 +7,13 @@ use App\Models\SocialPlatformAccount;
 use App\Models\WordpressPost;
 use App\SocialPublishing\Platforms\Facebook\FacebookVideoDeleter;
 use App\SocialPublishing\Actions\GenerateSocialArticleCaptionAction;
+use App\SocialPublishing\Actions\PlanSocialArticlePublicationAction;
 use App\SocialPublishing\Actions\PublishSocialArticleAction;
 use App\SocialPublishing\Actions\PublishSocialArticleBatchAction;
 use App\SocialPublishing\Enums\PublicationStatus;
+use App\SocialPublishing\Enums\VideoCaptionAiProvider;
+use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
+use Illuminate\Validation\Rule;
 use App\SocialPublishing\Enums\WordpressSite;
 use App\Wordpress\Actions\SyncWordpressPostsAction;
 use App\Wordpress\WordpressArticleStats;
@@ -22,7 +26,7 @@ use Inertia\Response;
 
 class WordpressArticleController extends Controller
 {
-    public function index(Request $request): Response
+    public function index(Request $request, VideoCaptionAiClientFactory $captionAi): Response
     {
         $siteFilter = (string) $request->query('site', 'esquinaweb');
         $site = WordpressSite::tryFromEnabled($siteFilter);
@@ -89,6 +93,7 @@ class WordpressArticleController extends Controller
             'stats' => WordpressArticleStats::compute($siteFilter),
             'sync' => $this->syncSettings(),
             'posts' => $posts->through(fn (WordpressPost $post) => $this->postPayload($post)),
+            'captionAiOptions' => $captionAi->optionsForUi(),
         ]);
     }
 
@@ -144,7 +149,10 @@ class WordpressArticleController extends Controller
             'platform' => 'nullable|string|max:64',
             'platforms' => 'nullable|array|min:1',
             'platforms.*' => 'string|max:64',
+            'caption_ai_provider' => ['nullable', Rule::in(VideoCaptionAiProvider::values())],
         ]);
+
+        $provider = $validated['caption_ai_provider'] ?? null;
 
         $site = $post->siteEnum();
 
@@ -162,7 +170,7 @@ class WordpressArticleController extends Controller
             }
 
             try {
-                $captions = $action->executeMany($post, $platformKeys);
+                $captions = $action->executeMany($post, $platformKeys, $provider);
             } catch (\Throwable $e) {
                 return response()->json(['message' => $e->getMessage()], 500);
             }
@@ -177,12 +185,156 @@ class WordpressArticleController extends Controller
         }
 
         try {
-            $caption = $action->execute($post, $platform);
+            $caption = $action->execute($post, $platform, $provider);
         } catch (\Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 500);
         }
 
         return response()->json(['caption' => $caption]);
+    }
+
+    public function generateCaptionsBatch(
+        Request $request,
+        GenerateSocialArticleCaptionAction $action,
+    ): JsonResponse {
+        $validated = $request->validate([
+            'post_ids' => 'required|array|min:1|max:20',
+            'post_ids.*' => 'integer|exists:wordpress_posts,id',
+            'platforms' => 'required|array|min:1',
+            'platforms.*' => 'string|max:64',
+            'caption_ai_provider' => ['required', Rule::in(VideoCaptionAiProvider::values())],
+        ]);
+
+        if ($validated['caption_ai_provider'] === VideoCaptionAiProvider::None->value) {
+            return response()->json(['message' => 'Elige Ollama local o DeepSeek para generar.'], 422);
+        }
+
+        $posts = WordpressPost::query()->whereIn('id', $validated['post_ids'])->get()->keyBy('id');
+        $captions = [];
+
+        foreach ($validated['post_ids'] as $postId) {
+            $post = $posts->get($postId);
+
+            if ($post === null) {
+                continue;
+            }
+
+            $site = $post->siteEnum();
+
+            if ($site === null) {
+                continue;
+            }
+
+            $allowedPlatforms = array_values(array_filter(
+                $validated['platforms'],
+                fn (string $key) => $site->allowsPlatform($key),
+            ));
+
+            if ($allowedPlatforms === []) {
+                continue;
+            }
+
+            try {
+                $captions[(string) $postId] = $action->executeMany(
+                    $post,
+                    $allowedPlatforms,
+                    $validated['caption_ai_provider'],
+                );
+            } catch (\Throwable $e) {
+                return response()->json([
+                    'message' => "Artículo #{$postId}: ".$e->getMessage(),
+                ], 500);
+            }
+        }
+
+        return response()->json(['captions' => $captions]);
+    }
+
+    public function batchPlan(
+        Request $request,
+        PlanSocialArticlePublicationAction $plan,
+    ): RedirectResponse {
+        $validated = $request->validate([
+            'post_ids' => 'required|array|min:1|max:30',
+            'post_ids.*' => 'integer|exists:wordpress_posts,id',
+            'platforms' => 'required|array|min:1',
+            'platforms.*' => 'string|max:64',
+            'mode' => 'required|in:now,queue',
+            'queued_publish_at' => 'nullable|date',
+            'facebook_scheduled_at' => 'nullable|date',
+            'messages' => 'nullable|array',
+        ]);
+
+        $mode = $validated['mode'];
+        $queuedAt = $this->parseScheduledAt($validated['queued_publish_at'] ?? null);
+        $facebookScheduledAt = $this->parseScheduledAt($validated['facebook_scheduled_at'] ?? null);
+
+        if ($mode === 'queue' && ($queuedAt === null || ! $queuedAt->isFuture())) {
+            return back()->with('error', 'Para encolar indica «Enviar automáticamente (app)» en el futuro.');
+        }
+
+        $posts = WordpressPost::query()->whereIn('id', $validated['post_ids'])->get();
+        $userId = (int) $request->user()->id;
+        $messages = $validated['messages'] ?? [];
+
+        $queued = 0;
+        $published = 0;
+        $failed = 0;
+        $errors = [];
+
+        foreach ($posts as $post) {
+            foreach ($validated['platforms'] as $platform) {
+                $site = $post->siteEnum();
+
+                if ($site === null || ! $site->allowsPlatform($platform)) {
+                    continue;
+                }
+
+                $message = $messages[$post->id][$platform] ?? $messages[(string) $post->id][$platform] ?? null;
+
+                try {
+                    $result = $plan->execute(
+                        $post,
+                        $platform,
+                        is_string($message) ? $message : null,
+                        $userId,
+                        str_starts_with($platform, 'facebook_') ? $facebookScheduledAt : null,
+                        $queuedAt,
+                        $mode === 'now',
+                    );
+
+                    if ($mode === 'queue') {
+                        $queued++;
+                    } elseif (in_array($result->status, [PublicationStatus::Published, PublicationStatus::Scheduled], true)) {
+                        $published++;
+                    } else {
+                        $failed++;
+                        $errors[] = $post->title.': '.($result->last_error ?? 'Error');
+                    }
+                } catch (\Throwable $e) {
+                    $failed++;
+                    $errors[] = $post->title.' ('.$platform.'): '.$e->getMessage();
+                }
+
+                if ($mode === 'now') {
+                    sleep(1);
+                }
+            }
+        }
+
+        if ($mode === 'queue') {
+            $message = "{$queued} publicación(es) en cola de la app.";
+
+            return back()->with('success', $message);
+        }
+
+        $message = "Publicados: {$published}, fallidos: {$failed}.";
+
+        if ($errors !== []) {
+            $message .= ' '.implode(' | ', array_slice($errors, 0, 3));
+        }
+
+        return back()->with($failed > 0 && $published === 0 ? 'error' : 'success', $message);
     }
 
     public function destroyOnFacebook(
@@ -257,12 +409,14 @@ class WordpressArticleController extends Controller
     public function publish(
         Request $request,
         WordpressPost $post,
-        PublishSocialArticleAction $action,
+        PlanSocialArticlePublicationAction $plan,
     ): RedirectResponse {
         $validated = $request->validate([
             'platform' => 'required|string|max:64',
             'message' => 'nullable|string|max:5000',
             'scheduled_at' => 'nullable|date',
+            'queued_publish_at' => 'nullable|date',
+            'delivery_mode' => 'nullable|in:now,queue',
         ]);
 
         $site = $post->siteEnum();
@@ -271,25 +425,37 @@ class WordpressArticleController extends Controller
             return back()->with('error', 'Plataforma no permitida para este artículo.');
         }
 
-        $scheduledAt = $this->parseScheduledAt($validated['scheduled_at'] ?? null);
+        $facebookScheduledAt = $this->parseScheduledAt($validated['scheduled_at'] ?? null);
+        $queuedAt = $this->parseScheduledAt($validated['queued_publish_at'] ?? null);
+        $deliveryMode = $validated['delivery_mode'] ?? 'now';
 
-        if ($scheduledAt !== null && ! str_starts_with($validated['platform'], 'facebook_')) {
-            return back()->with('error', 'Solo Facebook admite programación de artículos.');
+        if ($facebookScheduledAt !== null && ! str_starts_with($validated['platform'], 'facebook_')) {
+            return back()->with('error', 'La programación en Facebook solo aplica a Facebook.');
+        }
+
+        if ($deliveryMode === 'queue' && ($queuedAt === null || ! $queuedAt->isFuture())) {
+            return back()->with('error', 'Indica una fecha futura para la cola de la app.');
         }
 
         try {
-            $publication = $action->execute(
+            $publication = $plan->execute(
                 $post,
                 $validated['platform'],
                 $validated['message'] ?? null,
                 (int) $request->user()->id,
-                $scheduledAt,
+                $facebookScheduledAt,
+                $queuedAt,
+                $deliveryMode === 'now',
             );
         } catch (\Throwable $e) {
             return back()->with('error', $e->getMessage());
         }
 
         $label = $publication->platformLabel();
+
+        if ($publication->status === PublicationStatus::Queued) {
+            return back()->with('success', "Artículo en cola de la app para {$label}.");
+        }
 
         if ($publication->status === PublicationStatus::Scheduled) {
             return back()->with('success', "Artículo programado en {$label}.");
@@ -349,6 +515,7 @@ class WordpressArticleController extends Controller
                 'status_label' => $publication?->status->label() ?? 'Pendiente',
                 'status_icon' => $publication?->status->icon() ?? '—',
                 'scheduled_at' => $publication?->scheduled_at?->toIso8601String(),
+                'queued_publish_at' => $publication?->queued_publish_at?->toIso8601String(),
                 'published_at' => $publication?->published_at?->toIso8601String(),
                 'external_url' => $publication?->external_url,
                 'can_publish' => $publication === null || ! $publication->blocksRepublish(),

@@ -24,5 +24,12 @@ function linkClass(active) {
         >
             Planificador de tareas
         </Link>
+        <Link
+            :href="route('settings.queue.index')"
+            class="rounded-lg border px-3 py-1.5 text-sm transition"
+            :class="linkClass(route().current('settings.queue.*'))"
+        >
+            Cola Laravel
+        </Link>
     </nav>
 </template>

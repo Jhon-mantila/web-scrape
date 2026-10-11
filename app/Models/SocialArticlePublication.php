@@ -15,6 +15,7 @@ class SocialArticlePublication extends Model
         'status',
         'message',
         'scheduled_at',
+        'queued_publish_at',
         'published_at',
         'external_id',
         'external_url',
@@ -25,6 +26,7 @@ class SocialArticlePublication extends Model
     protected $casts = [
         'status' => PublicationStatus::class,
         'scheduled_at' => 'datetime',
+        'queued_publish_at' => 'datetime',
         'published_at' => 'datetime',
         'api_response' => 'array',
     ];

@@ -5,6 +5,7 @@ namespace App\ProcessScraping\Ai;
 use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
 use App\ProcessScraping\Ai\Support\AiHttpErrorMapper;
 use App\ProcessScraping\Ai\Support\AiSettings;
+use App\ProcessScraping\Ai\Support\OllamaConnectivity;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -13,7 +14,7 @@ class OllamaClient implements TextGenerationClient
 {
     public function generate(string $system, string $prompt, ?string $model = null): string
     {
-        $url = rtrim(config('services.ollama.url'), '/').'/api/generate';
+        $url = OllamaConnectivity::resolveBaseUrl().'/api/generate';
         $model ??= AiSettings::defaultModel();
 
         $payload = [
@@ -78,7 +79,7 @@ class OllamaClient implements TextGenerationClient
             try {
                 Http::timeout(15)
                     ->acceptJson()
-                    ->post(rtrim(config('services.ollama.url'), '/').'/api/generate', [
+                    ->post(OllamaConnectivity::resolveBaseUrl().'/api/generate', [
                         'model' => $name,
                         'keep_alive' => 0,
                     ]);
@@ -95,6 +96,6 @@ class OllamaClient implements TextGenerationClient
 
     public function supportsModelUnload(): bool
     {
-        return true;
+        return ! OllamaConnectivity::isRemoteActive();
     }
 }

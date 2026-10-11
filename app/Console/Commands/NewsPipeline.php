@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\ProcessScraping\Actions\RunNewsPipelineAction;
+use App\ProcessScraping\Support\ScraperArticleAiContext;
 use Illuminate\Console\Command;
 
 class NewsPipeline extends Command
@@ -30,16 +31,22 @@ class NewsPipeline extends Command
 
         $startedAt = microtime(true);
 
-        $summary = $action->execute(
-            $limit,
-            $mode,
-            (bool) $this->option('force'),
-            (bool) $this->option('include-raw-html'),
-            (bool) $this->option('skip-scrape'),
-            (bool) $this->option('skip-research'),
-            (bool) $this->option('skip-generate'),
-            (bool) $this->option('skip-wordpress'),
-        );
+        ScraperArticleAiContext::applyGlobalAiProviderFallback();
+
+        try {
+            $summary = $action->execute(
+                $limit,
+                $mode,
+                (bool) $this->option('force'),
+                (bool) $this->option('include-raw-html'),
+                (bool) $this->option('skip-scrape'),
+                (bool) $this->option('skip-research'),
+                (bool) $this->option('skip-generate'),
+                (bool) $this->option('skip-wordpress'),
+            );
+        } finally {
+            ScraperArticleAiContext::reset();
+        }
 
         $timings = $summary['timings'] ?? [];
         $step = 1;
