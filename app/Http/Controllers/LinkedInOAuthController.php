@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\SocialPublishing\Platforms\LinkedIn\LinkedInOAuthService;
+use App\SocialPublishing\Support\PlatformTokenSessionAlerts;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Throwable;
@@ -47,6 +48,7 @@ class LinkedInOAuthController extends Controller
             $tokens = $oauth->exchangeCode($request->string('code')->toString());
             $profile = $oauth->fetchProfile($tokens['access_token']);
             $oauth->storeCredentials($tokens, $profile);
+            PlatformTokenSessionAlerts::clear($oauth->platformKey());
         } catch (Throwable $e) {
             return redirect()->route('settings.index')->with('error', $e->getMessage());
         }

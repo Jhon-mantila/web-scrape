@@ -11,6 +11,7 @@ use App\SocialPublishing\Prompts\SocialCaptionBatchPrompt;
 use App\SocialPublishing\Prompts\SocialCaptionPrompt;
 use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
 use App\SocialPublishing\Support\VideoCaptionAiSettings;
+use App\SocialPublishing\Support\VideoCaptionOllamaContext;
 use Illuminate\Support\Facades\Log;
 
 class GenerateSocialCaptionsAction
@@ -30,20 +31,26 @@ class GenerateSocialCaptionsAction
             throw new \InvalidArgumentException('Este video está configurado sin IA para textos.');
         }
 
-        $llm = $this->clientFactory->client($provider);
-        $targets = $this->resolveTargets($video, $platforms);
+        VideoCaptionOllamaContext::applyFromVideo($video);
 
-        if ($targets === []) {
+        try {
+            $llm = $this->clientFactory->client($provider);
+            $targets = $this->resolveTargets($video, $platforms);
+
+            if ($targets === []) {
+                return $video->fresh(['publications']);
+            }
+
+            if (VideoCaptionAiSettings::batchesCaptions($provider)) {
+                $this->generateBatched($video, $targets, $llm, $provider);
+            } else {
+                $this->generatePerPlatform($video, $targets, $llm, $provider);
+            }
+
             return $video->fresh(['publications']);
+        } finally {
+            VideoCaptionOllamaContext::reset();
         }
-
-        if (VideoCaptionAiSettings::batchesCaptions($provider)) {
-            $this->generateBatched($video, $targets, $llm, $provider);
-        } else {
-            $this->generatePerPlatform($video, $targets, $llm, $provider);
-        }
-
-        return $video->fresh(['publications']);
     }
 
     /**
@@ -95,7 +102,7 @@ class GenerateSocialCaptionsAction
         $raw = $llm->generate(
             SocialCaptionBatchPrompt::system(),
             SocialCaptionBatchPrompt::user($video->title, $video->notes, $platforms),
-            VideoCaptionAiSettings::defaultModel($provider),
+            VideoCaptionAiSettings::modelForVideo($video, $provider),
         );
 
         $decoded = json_decode(trim($raw), true);
@@ -145,9 +152,10 @@ class GenerateSocialCaptionsAction
             $platform = $row['platform'];
             $publication = $row['publication'];
 
-            $model = VideoCaptionAiSettings::resolveConfiguredModel(
-                config("social.platforms.{$platform->value}.caption.model"),
+            $model = VideoCaptionAiSettings::modelForVideoPlatform(
+                $video,
                 $provider,
+                config("social.platforms.{$platform->value}.caption.model"),
             );
 
             $raw = $llm->generate(

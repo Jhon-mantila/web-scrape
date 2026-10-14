@@ -54,3 +54,5 @@ SCRAPER_ARTICLE_AI_MODEL=qwen3:14b
 ```
 
 En **Scraper** elige: Ollama local → Local o Cloudflare, y el modelo en el desplegable (lista `/api/tags`).
+
+En **Videos** (subir / editar): misma sección bajo «Ollama local»; la elección se guarda en el video al subir o al guardar.

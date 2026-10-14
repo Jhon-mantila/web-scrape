@@ -2,8 +2,9 @@
 import axios from 'axios';
 import { Link, router, useForm } from '@inertiajs/vue3';
 import { syncBackgroundRunAfterInertiaStart } from '@/support/backgroundRun.js';
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import VideoOllamaCaptionFields from '@/Components/VideoOllamaCaptionFields.vue';
 
 const props = defineProps({
     filters: {
@@ -13,6 +14,7 @@ const props = defineProps({
             pending_wordpress: false,
             pending_ai: false,
             scheduled_wp: false,
+            published_wp: false,
             failed: false,
             per_page: 15,
         }),
@@ -37,6 +39,7 @@ const props = defineProps({
             wp_published: 0,
             wp_drafts: 0,
             wp_legacy: 0,
+            wp_publish_purge_ready: 0,
             next_scheduled_at: null,
             last_scheduled_at: null,
             schedule_buffer_days: null,
@@ -81,6 +84,7 @@ const pipelineForm = useForm({
 });
 
 const syncWpForm = useForm({});
+const purgePublishedForm = useForm({});
 const attachFeaturedForm = useForm({
     limit: 50,
     all: false,
@@ -113,6 +117,7 @@ const hasActiveListFilters = computed(() => {
             || f.pending_wordpress
             || f.pending_ai
             || f.scheduled_wp
+            || f.published_wp
             || f.failed,
     );
 });
@@ -246,51 +251,6 @@ const regenerateIncludeRawHtml = ref(true);
 const regenerateArticleAiProvider = ref('ollama_local');
 const regenerateArticleOllamaTarget = ref('local');
 const regenerateArticleAiModel = ref('qwen3:14b');
-const ollamaModels = ref([]);
-const ollamaModelsLoading = ref(false);
-const ollamaModelsError = ref('');
-
-const ollamaRemoteConfigured = computed(() => props.pipeline.ollama?.remote_configured ?? false);
-const ollamaRemoteHost = computed(() => props.pipeline.ollama?.remote_host ?? 'Cloudflare');
-
-async function loadOllamaModels(target) {
-    ollamaModelsLoading.value = true;
-    ollamaModelsError.value = '';
-
-    try {
-        const { data } = await axios.get(route('scraper.ollama-models'), {
-            params: { target },
-        });
-
-        ollamaModels.value = data.models ?? [];
-        const names = ollamaModels.value.map((m) => m.name);
-        const preferred = pipelineForm.article_ai_model || data.default_model || 'qwen3:14b';
-
-        if (names.includes(preferred)) {
-            pipelineForm.article_ai_model = preferred;
-        } else if (names.includes(data.default_model)) {
-            pipelineForm.article_ai_model = data.default_model;
-        } else if (names.length > 0) {
-            pipelineForm.article_ai_model = names[0];
-        }
-    } catch (error) {
-        ollamaModels.value = [];
-        ollamaModelsError.value =
-            error.response?.data?.message || 'No se pudieron cargar los modelos de Ollama.';
-    } finally {
-        ollamaModelsLoading.value = false;
-    }
-}
-
-watch(
-    () => [pipelineForm.article_ai_provider, pipelineForm.article_ollama_target],
-    ([provider, target]) => {
-        if (provider === 'ollama_local') {
-            loadOllamaModels(target || 'local');
-        }
-    },
-);
-
 function onEscapeKey(event) {
     if (event.key === 'Escape' && previewOpen.value) {
         closePreview();
@@ -299,10 +259,6 @@ function onEscapeKey(event) {
 
 onMounted(() => {
     document.addEventListener('keydown', onEscapeKey);
-
-    if (pipelineForm.article_ai_provider === 'ollama_local') {
-        loadOllamaModels(pipelineForm.article_ollama_target);
-    }
 });
 
 onUnmounted(() => {
@@ -435,6 +391,22 @@ function onSendWordpressChange(checked) {
     }
 }
 
+function setScheduledWpFilter(enabled) {
+    applyFilters({
+        scheduled_wp: enabled || undefined,
+        published_wp: enabled ? undefined : props.filters.published_wp || undefined,
+        page: 1,
+    });
+}
+
+function setPublishedWpFilter(enabled) {
+    applyFilters({
+        published_wp: enabled || undefined,
+        scheduled_wp: enabled ? undefined : props.filters.scheduled_wp || undefined,
+        page: 1,
+    });
+}
+
 function applyFilters(overrides = {}) {
     router.get(
         route('scraper.index'),
@@ -444,6 +416,7 @@ function applyFilters(overrides = {}) {
             pending_wordpress: props.filters.pending_wordpress || undefined,
             pending_ai: props.filters.pending_ai || undefined,
             scheduled_wp: props.filters.scheduled_wp || undefined,
+            published_wp: props.filters.published_wp || undefined,
             failed: props.filters.failed || undefined,
             ...overrides,
         },
@@ -495,6 +468,47 @@ function runPipeline() {
 
 function syncWordpressStatus() {
     syncWpForm.post(route('scraper.sync-wordpress'), {
+        preserveScroll: true,
+    });
+}
+
+async function purgePublishedLocal() {
+    if (purgePublishedForm.processing) {
+        return;
+    }
+
+    let count = props.stats?.wp_publish_purge_ready ?? 0;
+
+    try {
+        const { data } = await axios.get(route('scraper.purge-published.count'));
+        count = data.count ?? count;
+    } catch {
+        window.alert('No se pudo consultar cuántas noticias se eliminarían.');
+
+        return;
+    }
+
+    if (count === 0) {
+        window.alert(
+            'No hay noticias elegibles: pipeline completo, WP en estado «publicado» (no programados ni borradores).',
+        );
+
+        return;
+    }
+
+    const ok = window.confirm(
+        `¿Eliminar ${count} noticia(s) del scraper?\n\n`
+            + 'Solo entradas con Listado → Detalle → Imagen → Research → IA → WordPress publicado (publish).\n'
+            + 'NO se borran programados (future) ni borradores.\n'
+            + 'Se eliminan registro local, detalle, IA e imagen en disco.\n'
+            + 'Los posts en WordPress NO se eliminan.',
+    );
+
+    if (!ok) {
+        return;
+    }
+
+    purgePublishedForm.post(route('scraper.purge-published'), {
         preserveScroll: true,
     });
 }
@@ -856,15 +870,58 @@ function closePreview() {
                     <code class="text-slate-500">news:attach-wordpress-featured-images --all</code>
                 </p>
 
+                <div class="mt-4 rounded-xl border border-red-900/50 bg-red-950/20 p-3">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <h4 class="text-sm font-medium text-red-200">Limpiar publicados (solo app)</h4>
+                            <p class="mt-1 max-w-xl text-xs text-slate-400">
+                                Borra noticias anime con pipeline completo y
+                                <span class="text-slate-300">wordpress_status = publish</span>.
+                                Excluye programados y borradores. No elimina posts en WordPress.
+                            </p>
+                            <p class="mt-1 text-xs text-slate-500">
+                                Elegibles ahora:
+                                <span class="font-medium text-red-200/90">{{ stats.wp_publish_purge_ready }}</span>
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            class="rounded-lg border border-red-700/70 bg-red-950/50 px-3 py-1.5 text-sm text-red-200 hover:bg-red-900/40 disabled:opacity-50"
+                            :disabled="purgePublishedForm.processing || stats.wp_publish_purge_ready === 0"
+                            @click="purgePublishedLocal"
+                        >
+                            {{
+                                purgePublishedForm.processing
+                                    ? 'Eliminando…'
+                                    : 'Eliminar publicados completos'
+                            }}
+                        </button>
+                    </div>
+                </div>
+
                 <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <div class="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2.5">
-                        <p class="text-xs text-slate-500">Programados</p>
+                    <button
+                        type="button"
+                        class="rounded-xl border px-3 py-2.5 text-left transition"
+                        :class="filters.scheduled_wp
+                            ? 'border-sky-500/60 bg-sky-950/40 ring-1 ring-sky-500/30'
+                            : 'border-slate-800 bg-slate-950/50 hover:border-slate-600'"
+                        @click="setScheduledWpFilter(!filters.scheduled_wp)"
+                    >
+                        <p class="text-xs text-slate-500">Programados · filtrar lista</p>
                         <p class="text-xl font-semibold text-sky-300">{{ stats.wp_scheduled }}</p>
-                    </div>
-                    <div class="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2.5">
-                        <p class="text-xs text-slate-500">Publicados</p>
+                    </button>
+                    <button
+                        type="button"
+                        class="rounded-xl border px-3 py-2.5 text-left transition"
+                        :class="filters.published_wp
+                            ? 'border-emerald-500/60 bg-emerald-950/40 ring-1 ring-emerald-500/30'
+                            : 'border-slate-800 bg-slate-950/50 hover:border-slate-600'"
+                        @click="setPublishedWpFilter(!filters.published_wp)"
+                    >
+                        <p class="text-xs text-slate-500">Publicados · filtrar lista</p>
                         <p class="text-xl font-semibold text-emerald-300">{{ stats.wp_published }}</p>
-                    </div>
+                    </button>
                     <div class="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2.5">
                         <p class="text-xs text-slate-500">Borradores</p>
                         <p class="text-xl font-semibold text-slate-300">{{ stats.wp_drafts }}</p>
@@ -935,83 +992,34 @@ function closePreview() {
                     class="mt-4 rounded-xl border border-slate-800 bg-slate-950/60 p-3"
                 >
                     <p class="mb-2 text-xs font-medium text-slate-300">IA para artículos</p>
-                    <div class="flex flex-wrap gap-3">
-                        <label
-                            v-for="opt in captionAiOptions"
-                            :key="opt.value"
-                            class="flex cursor-pointer items-start gap-2 text-xs"
-                            :class="opt.disabled ? 'cursor-not-allowed opacity-50' : ''"
-                        >
-                            <input
-                                v-model="pipelineForm.article_ai_provider"
-                                type="radio"
-                                name="article_ai_provider"
-                                :value="opt.value"
-                                :disabled="opt.disabled"
-                                class="mt-0.5"
-                            />
-                            <span>
-                                <span class="font-medium text-slate-200">{{ opt.label }}</span>
-                                <span class="mt-0.5 block text-slate-500">{{ opt.hint }}</span>
-                            </span>
-                        </label>
-                    </div>
-                    <div
-                        v-if="pipelineForm.article_ai_provider === 'ollama_local'"
-                        class="mt-3 space-y-3 border-t border-slate-800 pt-3"
-                    >
-                        <p class="text-xs font-medium text-slate-400">Conexión Ollama</p>
-                        <div class="flex flex-wrap gap-4 text-xs">
-                            <label class="flex cursor-pointer items-center gap-2">
-                                <input
-                                    v-model="pipelineForm.article_ollama_target"
-                                    type="radio"
-                                    name="article_ollama_target"
-                                    value="local"
-                                />
-                                <span class="text-slate-200">Local ({{ pipeline.ollama?.local_hint ?? 'OLLAMA_URL' }})</span>
-                            </label>
+                    <div class="space-y-2">
+                        <div v-for="opt in captionAiOptions" :key="opt.value">
                             <label
-                                class="flex items-center gap-2"
-                                :class="ollamaRemoteConfigured ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'"
+                                class="flex cursor-pointer items-start gap-2 text-xs"
+                                :class="opt.disabled ? 'cursor-not-allowed opacity-50' : ''"
                             >
                                 <input
-                                    v-model="pipelineForm.article_ollama_target"
+                                    v-model="pipelineForm.article_ai_provider"
                                     type="radio"
-                                    name="article_ollama_target"
-                                    value="remote"
-                                    :disabled="!ollamaRemoteConfigured"
+                                    name="article_ai_provider"
+                                    :value="opt.value"
+                                    :disabled="opt.disabled"
+                                    class="mt-0.5"
                                 />
-                                <span class="text-slate-200">
-                                    Cloudflare
-                                    <span v-if="ollamaRemoteHost" class="text-slate-500">({{ ollamaRemoteHost }})</span>
+                                <span>
+                                    <span class="font-medium text-slate-200">{{ opt.label }}</span>
+                                    <span class="mt-0.5 block text-slate-500">{{ opt.hint }}</span>
                                 </span>
                             </label>
+                            <VideoOllamaCaptionFields
+                                v-if="opt.value === 'ollama_local'"
+                                v-model:target="pipelineForm.article_ollama_target"
+                                v-model:model="pipelineForm.article_ai_model"
+                                :ollama="pipeline.ollama ?? {}"
+                                :enabled="pipelineForm.article_ai_provider === 'ollama_local'"
+                                nested
+                            />
                         </div>
-                        <p v-if="!ollamaRemoteConfigured" class="text-xs text-slate-500">
-                            Remoto: define <code class="text-slate-400">OLLAMA_REMOTE_URL=https://esquina-api.cloud</code> en .env.
-                        </p>
-                        <label class="block text-xs text-slate-400">
-                            Modelo
-                            <select
-                                v-model="pipelineForm.article_ai_model"
-                                class="mt-1 w-full max-w-md rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-white disabled:opacity-50"
-                                :disabled="ollamaModelsLoading || ollamaModels.length === 0"
-                            >
-                                <option v-if="ollamaModelsLoading" value="">Cargando modelos…</option>
-                                <option
-                                    v-for="m in ollamaModels"
-                                    :key="m.name"
-                                    :value="m.name"
-                                >
-                                    {{ m.name }}
-                                </option>
-                            </select>
-                        </label>
-                        <p v-if="ollamaModelsError" class="text-xs text-red-400">{{ ollamaModelsError }}</p>
-                        <p v-else-if="!ollamaModelsLoading && ollamaModels.length === 0" class="text-xs text-amber-400/90">
-                            No hay modelos en ese destino. Comprueba que Ollama esté arriba y que el túnel responda en /api/tags.
-                        </p>
                     </div>
                     <p
                         v-if="pipelineForm.article_ai_provider === 'none'"
@@ -1179,15 +1187,29 @@ function closePreview() {
                     <span class="whitespace-nowrap">Pend. IA</span>
                 </label>
 
+                <span class="text-xs font-medium uppercase tracking-wide text-slate-500">WordPress</span>
+
                 <label class="flex cursor-pointer items-center gap-1.5 text-sm text-slate-300">
                     <input
                         type="checkbox"
                         :checked="filters.scheduled_wp"
                         class="rounded border-slate-600 bg-slate-950"
-                        @change="applyFilters({ scheduled_wp: $event.target.checked || undefined, page: 1 })"
+                        @change="setScheduledWpFilter($event.target.checked)"
                     />
-                    <span class="whitespace-nowrap">Programados WP</span>
+                    <span class="whitespace-nowrap text-sky-200/90">Programados</span>
                 </label>
+
+                <label class="flex cursor-pointer items-center gap-1.5 text-sm text-slate-300">
+                    <input
+                        type="checkbox"
+                        :checked="filters.published_wp"
+                        class="rounded border-slate-600 bg-slate-950"
+                        @change="setPublishedWpFilter($event.target.checked)"
+                    />
+                    <span class="whitespace-nowrap text-emerald-200/90">Publicados</span>
+                </label>
+
+                <div class="hidden h-5 w-px bg-slate-700 sm:block" />
 
                 <label class="flex cursor-pointer items-center gap-1.5 text-sm text-slate-300">
                     <input

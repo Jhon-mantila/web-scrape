@@ -7,6 +7,7 @@ use App\SocialPublishing\Enums\VideoCaptionAiProvider;
 use App\SocialPublishing\Prompts\SocialTitlePrompt;
 use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
 use App\SocialPublishing\Support\VideoCaptionAiSettings;
+use App\SocialPublishing\Support\VideoCaptionOllamaContext;
 
 class GenerateSocialTitleAction
 {
@@ -22,22 +23,28 @@ class GenerateSocialTitleAction
             throw new \InvalidArgumentException('Este video está configurado sin IA para textos.');
         }
 
-        $llm = $this->clientFactory->client($provider);
-        $model = VideoCaptionAiSettings::defaultModel($provider);
+        VideoCaptionOllamaContext::applyFromVideo($video);
 
-        $raw = $llm->generate(
-            SocialTitlePrompt::system(),
-            SocialTitlePrompt::user($video->title, $video->notes),
-            $model,
-        );
+        try {
+            $llm = $this->clientFactory->client($provider);
+            $model = VideoCaptionAiSettings::modelForVideo($video, $provider);
 
-        $title = $this->parseTitle($raw) ?? trim($raw);
+            $raw = $llm->generate(
+                SocialTitlePrompt::system(),
+                SocialTitlePrompt::user($video->title, $video->notes),
+                $model,
+            );
 
-        if ($title !== '') {
-            $video->update(['title' => mb_substr($title, 0, 255)]);
+            $title = $this->parseTitle($raw) ?? trim($raw);
+
+            if ($title !== '') {
+                $video->update(['title' => mb_substr($title, 0, 255)]);
+            }
+
+            return $video->fresh();
+        } finally {
+            VideoCaptionOllamaContext::reset();
         }
-
-        return $video->fresh();
     }
 
     private function parseTitle(string $raw): ?string

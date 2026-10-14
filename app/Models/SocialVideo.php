@@ -16,6 +16,8 @@ class SocialVideo extends Model
         'thumbnail_path',
         'notes',
         'caption_ai_provider',
+        'caption_ollama_target',
+        'caption_ai_model',
     ];
 
     public function captionAiProvider(): VideoCaptionAiProvider

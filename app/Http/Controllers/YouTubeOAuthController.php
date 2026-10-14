@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\SocialPublishing\Platforms\YouTube\YouTubeOAuthService;
+use App\SocialPublishing\Support\PlatformTokenSessionAlerts;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Throwable;
@@ -38,6 +39,7 @@ class YouTubeOAuthController extends Controller
         try {
             $tokens = $oauth->exchangeCode($request->string('code')->toString());
             $oauth->storeTokens($tokens);
+            PlatformTokenSessionAlerts::clear('youtube');
         } catch (Throwable $e) {
             return redirect()->route('settings.index')->with('error', $e->getMessage());
         }

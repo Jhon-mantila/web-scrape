@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { useForm } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import FilePicker from '@/Components/FilePicker.vue';
+import VideoOllamaCaptionFields from '@/Components/VideoOllamaCaptionFields.vue';
 
 const props = defineProps({
     platformOptions: {
@@ -12,6 +13,10 @@ const props = defineProps({
     captionAiOptions: {
         type: Array,
         default: () => [],
+    },
+    captionAiDefaults: {
+        type: Object,
+        default: () => ({}),
     },
 });
 
@@ -45,6 +50,8 @@ const form = useForm({
     title: '',
     notes: '',
     caption_ai_provider: 'ollama_local',
+    caption_ollama_target: props.captionAiDefaults.caption_ollama_target ?? 'local',
+    caption_ai_model: props.captionAiDefaults.caption_ai_model ?? 'qwen3:14b',
     platforms: props.platformOptions.filter((p) => p.enabled && !p.coming_soon).map((p) => p.key),
 });
 
@@ -114,28 +121,42 @@ function togglePlatform(key) {
             <div>
                 <p class="mb-3 text-sm text-slate-300">Generación de textos con IA</p>
                 <div class="space-y-2">
-                    <label
-                        v-for="opt in captionAiOptions"
-                        :key="opt.value"
-                        class="flex cursor-pointer gap-3 rounded-xl border border-slate-800 px-4 py-3 hover:bg-slate-900"
-                        :class="opt.disabled ? 'cursor-not-allowed opacity-50' : ''"
-                    >
-                        <input
-                            v-model="form.caption_ai_provider"
-                            type="radio"
-                            name="caption_ai_provider"
-                            :value="opt.value"
-                            :disabled="opt.disabled"
-                            class="mt-1"
+                    <div v-for="opt in captionAiOptions" :key="opt.value">
+                        <label
+                            class="flex cursor-pointer gap-3 rounded-xl border border-slate-800 px-4 py-3 hover:bg-slate-900"
+                            :class="opt.disabled ? 'cursor-not-allowed opacity-50' : ''"
+                        >
+                            <input
+                                v-model="form.caption_ai_provider"
+                                type="radio"
+                                name="caption_ai_provider"
+                                :value="opt.value"
+                                :disabled="opt.disabled"
+                                class="mt-1"
+                            />
+                            <span class="text-sm">
+                                <span class="font-medium text-slate-200">{{ opt.label }}</span>
+                                <span class="mt-0.5 block text-xs text-slate-500">{{ opt.hint }}</span>
+                            </span>
+                        </label>
+                        <VideoOllamaCaptionFields
+                            v-if="opt.value === 'ollama_local'"
+                            v-model:target="form.caption_ollama_target"
+                            v-model:model="form.caption_ai_model"
+                            :ollama="captionAiDefaults.ollama"
+                            :enabled="form.caption_ai_provider === 'ollama_local'"
+                            nested
                         />
-                        <span class="text-sm">
-                            <span class="font-medium text-slate-200">{{ opt.label }}</span>
-                            <span class="mt-0.5 block text-xs text-slate-500">{{ opt.hint }}</span>
-                        </span>
-                    </label>
+                    </div>
                 </div>
                 <p v-if="form.errors.caption_ai_provider" class="mt-1 text-sm text-red-400">
                     {{ form.errors.caption_ai_provider }}
+                </p>
+                <p v-if="form.errors.caption_ollama_target" class="mt-1 text-sm text-red-400">
+                    {{ form.errors.caption_ollama_target }}
+                </p>
+                <p v-if="form.errors.caption_ai_model" class="mt-1 text-sm text-red-400">
+                    {{ form.errors.caption_ai_model }}
                 </p>
             </div>
 

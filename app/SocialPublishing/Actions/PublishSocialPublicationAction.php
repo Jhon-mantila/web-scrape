@@ -5,6 +5,7 @@ namespace App\SocialPublishing\Actions;
 use App\Models\SocialPublication;
 use App\SocialPublishing\Enums\PublicationStatus;
 use App\SocialPublishing\Registry\SocialPublisherRegistry;
+use App\SocialPublishing\Support\RegisterPlatformTokenFailure;
 
 class PublishSocialPublicationAction
 {
@@ -52,6 +53,8 @@ class PublishSocialPublicationAction
                     'last_error' => null,
                 ]);
             } else {
+                RegisterPlatformTokenFailure::fromPlatform($platform, $result->error);
+
                 $publication->update([
                     'status' => PublicationStatus::Failed,
                     'external_id' => $result->externalId,
@@ -60,6 +63,8 @@ class PublishSocialPublicationAction
                 ]);
             }
         } catch (\Throwable $e) {
+            RegisterPlatformTokenFailure::fromPlatform($platform, $e->getMessage());
+
             $publication->update([
                 'status' => PublicationStatus::Failed,
                 'last_error' => $e->getMessage(),

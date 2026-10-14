@@ -33,6 +33,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/scraper/news/{news}/preview', [ScraperController::class, 'preview'])->name('scraper.preview');
     Route::post('/scraper/news/{news}/regenerate-ai', [ScraperController::class, 'regenerateAi'])->name('scraper.regenerate-ai');
     Route::post('/scraper/sync-wordpress', [ScraperController::class, 'syncWordpressStatus'])->name('scraper.sync-wordpress');
+    Route::get('/scraper/purge-published/count', [ScraperController::class, 'purgePublishedCount'])->name('scraper.purge-published.count');
+    Route::post('/scraper/purge-published', [ScraperController::class, 'purgePublished'])->name('scraper.purge-published');
     Route::post('/scraper/attach-wordpress-featured-images', [ScraperController::class, 'attachWordpressFeaturedImages'])
         ->name('scraper.attach-wordpress-featured-images');
     Route::post('/scraper/download-featured-images', [ScraperController::class, 'downloadFeaturedImages'])

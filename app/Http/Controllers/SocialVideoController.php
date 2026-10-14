@@ -14,6 +14,7 @@ use App\SocialPublishing\Actions\PromoteDueScheduledPublicationsAction;
 use App\SocialPublishing\Enums\Platform;
 use App\SocialPublishing\Enums\PublicationStatus;
 use App\SocialPublishing\Enums\VideoCaptionAiProvider;
+use App\ProcessScraping\Ai\Support\OllamaConnectivity;
 use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
 use App\SocialPublishing\Platforms\Facebook\FacebookPageFeedScheduler;
 use App\SocialPublishing\Platforms\Facebook\FacebookVideoDeleter;
@@ -57,6 +58,7 @@ class SocialVideoController extends Controller
         return Inertia::render('Videos/Create', [
             'platformOptions' => $this->platformOptions(),
             'captionAiOptions' => $captionAi->optionsForUi(),
+            'captionAiDefaults' => $this->captionAiDefaults(),
         ]);
     }
 
@@ -72,6 +74,8 @@ class SocialVideoController extends Controller
             'video' => $this->videoUploadRules($maxMb),
             'thumbnail' => 'nullable|file|mimes:'.implode(',', config('social.upload.thumbnail_mimes')).'|max:10240',
             'caption_ai_provider' => $this->captionAiProviderValidation(),
+            'caption_ollama_target' => $this->captionOllamaTargetValidation(),
+            'caption_ai_model' => $this->captionAiModelValidation(),
         ]);
 
         DB::transaction(function () use ($request, $validated): void {
@@ -103,6 +107,10 @@ class SocialVideoController extends Controller
                 'notes' => $validated['notes'] ?? null,
                 'caption_ai_provider' => $validated['caption_ai_provider']
                     ?? VideoCaptionAiProvider::OllamaLocal->value,
+                'caption_ollama_target' => $validated['caption_ollama_target']
+                    ?? (string) config('services.videos.caption_ollama_target', OllamaConnectivity::TARGET_LOCAL),
+                'caption_ai_model' => $validated['caption_ai_model']
+                    ?? (string) config('services.videos.caption_ai_default_model'),
             ]);
 
             foreach ($validated['platforms'] as $platform) {
@@ -132,6 +140,7 @@ class SocialVideoController extends Controller
             'video' => $this->videoPayload($video, detailed: true),
             'platformOptions' => $this->platformOptions(),
             'captionAiOptions' => app(VideoCaptionAiClientFactory::class)->optionsForUi(),
+            'captionAiDefaults' => $this->captionAiDefaults(),
         ]);
     }
 
@@ -149,6 +158,8 @@ class SocialVideoController extends Controller
             'publications.*.scheduled_at' => 'nullable|date',
             'publications.*.queued_publish_at' => 'nullable|date',
             'caption_ai_provider' => $this->captionAiProviderValidation(),
+            'caption_ollama_target' => $this->captionOllamaTargetValidation(),
+            'caption_ai_model' => $this->captionAiModelValidation(),
         ]);
 
         $updates = [];
@@ -160,6 +171,16 @@ class SocialVideoController extends Controller
 
         if (array_key_exists('caption_ai_provider', $validated) && $validated['caption_ai_provider'] !== null) {
             $updates['caption_ai_provider'] = $validated['caption_ai_provider'];
+        }
+
+        if (array_key_exists('caption_ollama_target', $validated) && $validated['caption_ollama_target'] !== null) {
+            $updates['caption_ollama_target'] = $validated['caption_ollama_target'];
+        }
+
+        if (array_key_exists('caption_ai_model', $validated)) {
+            $updates['caption_ai_model'] = $validated['caption_ai_model'] !== null && $validated['caption_ai_model'] !== ''
+                ? $validated['caption_ai_model']
+                : (string) config('services.videos.caption_ai_default_model');
         }
 
         if ($request->hasFile('thumbnail')) {
@@ -511,6 +532,9 @@ class SocialVideoController extends Controller
             'has_thumbnail' => $video->thumbnail_path !== null && $video->thumbnail_path !== '',
             'caption_ai_provider' => $video->captionAiProvider()->value,
             'caption_ai_provider_label' => $video->captionAiProvider()->label(),
+            'caption_ollama_target' => $video->caption_ollama_target ?? OllamaConnectivity::TARGET_LOCAL,
+            'caption_ai_model' => $video->caption_ai_model
+                ?? (string) config('services.videos.caption_ai_default_model'),
             'uses_caption_ai' => $video->usesCaptionAi(),
             'created_at' => $video->created_at?->toIso8601String(),
             'publications' => $video->publications->map(fn (SocialPublication $p) => [
@@ -596,6 +620,50 @@ class SocialVideoController extends Controller
                 }
             },
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function captionAiDefaults(): array
+    {
+        $remoteUrl = (string) config('services.ollama.remote_url', '');
+        $remoteHost = $remoteUrl !== '' ? (parse_url($remoteUrl, PHP_URL_HOST) ?: $remoteUrl) : null;
+
+        return [
+            'caption_ollama_target' => (string) config('services.videos.caption_ollama_target', OllamaConnectivity::TARGET_LOCAL),
+            'caption_ai_model' => (string) config('services.videos.caption_ai_default_model'),
+            'ollama' => [
+                'remote_configured' => OllamaConnectivity::remoteConfigured(),
+                'remote_host' => $remoteHost,
+                'local_hint' => 'OLLAMA_URL (Docker → WSL)',
+            ],
+        ];
+    }
+
+    /**
+     * @return array<int, string|\Illuminate\Validation\Rules\In|\Closure>
+     */
+    private function captionOllamaTargetValidation(): array
+    {
+        return [
+            'nullable',
+            'string',
+            Rule::in([OllamaConnectivity::TARGET_LOCAL, OllamaConnectivity::TARGET_REMOTE]),
+            function (string $attribute, mixed $value, \Closure $fail): void {
+                if ($value === OllamaConnectivity::TARGET_REMOTE && ! OllamaConnectivity::remoteConfigured()) {
+                    $fail('Ollama remoto no está configurado. Añade OLLAMA_REMOTE_URL al .env.');
+                }
+            },
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function captionAiModelValidation(): array
+    {
+        return ['nullable', 'string', 'max:120'];
     }
 
     private function platformOptions(): array

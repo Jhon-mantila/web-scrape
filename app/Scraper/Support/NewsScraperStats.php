@@ -5,6 +5,7 @@ namespace App\Scraper\Support;
 use App\Models\News;
 use App\Models\NewsAiArticle;
 use App\Models\NewsDetail;
+use App\Scraper\Actions\DeleteFullyPublishedScraperNewsAction;
 use Illuminate\Support\Carbon;
 
 class NewsScraperStats
@@ -24,7 +25,8 @@ class NewsScraperStats
      *     wp_legacy: int,
      *     next_scheduled_at: ?string,
      *     last_scheduled_at: ?string,
-     *     schedule_buffer_days: ?int
+     *     schedule_buffer_days: ?int,
+     *     wp_publish_purge_ready: int
      * }
      */
     public static function compute(): array
@@ -73,6 +75,7 @@ class NewsScraperStats
                 ? Carbon::parse($lastScheduledRaw, $timezone)->toIso8601String()
                 : null,
             'schedule_buffer_days' => $scheduleBufferDays,
+            'wp_publish_purge_ready' => app(DeleteFullyPublishedScraperNewsAction::class)->countEligible(),
         ];
     }
 }

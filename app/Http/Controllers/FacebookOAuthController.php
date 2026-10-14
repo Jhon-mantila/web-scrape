@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\SocialPublishing\Platforms\Facebook\FacebookOAuthService;
+use App\SocialPublishing\Support\PlatformTokenSessionAlerts;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Throwable;
@@ -49,6 +50,7 @@ class FacebookOAuthController extends Controller
             $tokenData = $oauth->exchangeCode($request->string('code')->toString());
             $page = $oauth->resolvePageToken($tokenData['access_token']);
             $oauth->storePageCredentials($page, $tokenData['expires_in']);
+            PlatformTokenSessionAlerts::clear($oauth->platformKey());
         } catch (Throwable $e) {
             return redirect()->route('settings.index')->with('error', $e->getMessage());
         }

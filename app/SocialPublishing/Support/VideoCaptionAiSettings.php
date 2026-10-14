@@ -2,6 +2,7 @@
 
 namespace App\SocialPublishing\Support;
 
+use App\Models\SocialVideo;
 use App\SocialPublishing\Enums\VideoCaptionAiProvider;
 
 class VideoCaptionAiSettings
@@ -47,5 +48,42 @@ class VideoCaptionAiSettings
         }
 
         return $configured;
+    }
+
+    public static function modelForVideo(SocialVideo $video, VideoCaptionAiProvider|string $provider): string
+    {
+        $provider = $provider instanceof VideoCaptionAiProvider
+            ? $provider
+            : VideoCaptionAiProvider::tryFromStored(is_string($provider) ? $provider : null);
+
+        if ($provider === VideoCaptionAiProvider::OllamaLocal) {
+            $fromVideo = trim((string) ($video->caption_ai_model ?? ''));
+
+            if ($fromVideo !== '') {
+                return $fromVideo;
+            }
+        }
+
+        return self::defaultModel($provider);
+    }
+
+    public static function modelForVideoPlatform(
+        SocialVideo $video,
+        VideoCaptionAiProvider|string $provider,
+        ?string $platformConfiguredModel,
+    ): string {
+        $provider = $provider instanceof VideoCaptionAiProvider
+            ? $provider
+            : VideoCaptionAiProvider::tryFromStored(is_string($provider) ? $provider : null);
+
+        if ($provider === VideoCaptionAiProvider::OllamaLocal) {
+            $fromVideo = trim((string) ($video->caption_ai_model ?? ''));
+
+            if ($fromVideo !== '') {
+                return $fromVideo;
+            }
+        }
+
+        return self::resolveConfiguredModel($platformConfiguredModel, $provider);
     }
 }

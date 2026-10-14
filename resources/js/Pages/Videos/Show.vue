@@ -4,12 +4,17 @@ import { syncBackgroundRunAfterInertiaStart } from '@/support/backgroundRun.js';
 import { computed, ref, watch } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import FilePicker from '@/Components/FilePicker.vue';
+import VideoOllamaCaptionFields from '@/Components/VideoOllamaCaptionFields.vue';
 
 const props = defineProps({
     video: Object,
     captionAiOptions: {
         type: Array,
         default: () => [],
+    },
+    captionAiDefaults: {
+        type: Object,
+        default: () => ({}),
     },
 });
 
@@ -19,6 +24,8 @@ const form = useForm({
     title: props.video.title,
     notes: props.video.notes || '',
     caption_ai_provider: props.video.caption_ai_provider ?? 'ollama_local',
+    caption_ollama_target: props.video.caption_ollama_target ?? 'local',
+    caption_ai_model: props.video.caption_ai_model ?? 'qwen3:14b',
     thumbnail: null,
     publications: props.video.publications.map((p) => ({
         id: p.id,
@@ -33,9 +40,7 @@ const usesCaptionAi = computed(() => form.caption_ai_provider !== 'none');
 const displayThumbnail = computed(() => thumbnailPreview.value || props.video.thumbnail_url || null);
 
 const publishablePublications = computed(() =>
-    props.video.publications.filter(
-        (p) => !p.coming_soon && p.status !== 'published' && p.status !== 'scheduled',
-    ),
+    props.video.publications.filter((p) => isPublishable(p)),
 );
 
 const publishableCount = computed(() => publishablePublications.value.length);
@@ -48,24 +53,54 @@ const selectedPublishableCount = computed(() =>
     ).length,
 );
 
+function publicationFormRow(publicationId) {
+    return form.publications.find((row) => row.id === publicationId);
+}
+
+function effectiveQueuedPublishAt(pub) {
+    const row = publicationFormRow(pub.id);
+    const fromForm = typeof row?.queued_publish_at === 'string' ? row.queued_publish_at.trim() : '';
+    const raw = fromForm !== '' ? fromForm : pub.queued_publish_at;
+
+    if (!raw) {
+        return null;
+    }
+
+    const parsed = new Date(raw);
+
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function hasFutureAppQueue(pub) {
+    const at = effectiveQueuedPublishAt(pub);
+
+    return at !== null && at > new Date();
+}
+
 function isPublishable(pub) {
-    if (pub.coming_soon || pub.status === 'published' || pub.status === 'scheduled') {
+    if (pub.coming_soon || pub.status === 'published' || pub.status === 'scheduled' || pub.status === 'queued') {
         return false;
     }
 
-    if (pub.queued_publish_at && new Date(pub.queued_publish_at) > new Date()) {
+    if (hasFutureAppQueue(pub)) {
         return false;
     }
 
     return true;
 }
 
+function prunePublicationSelection() {
+    selectedPublicationIds.value = selectedPublicationIds.value.filter((id) => {
+        const pub = props.video.publications.find((p) => p.id === id);
+
+        return pub !== undefined && isPublishable(pub);
+    });
+}
+
 function syncPublicationSelection() {
     const publishableIds = publishablePublications.value.map((p) => p.id);
 
-    selectedPublicationIds.value = selectedPublicationIds.value.filter((id) =>
-        publishableIds.includes(id),
-    );
+    prunePublicationSelection();
 
     if (selectedPublicationIds.value.length === 0 && publishableIds.length > 0) {
         selectedPublicationIds.value = [...publishableIds];
@@ -83,6 +118,13 @@ function togglePublicationSelection(id) {
 function selectAllPublishable() {
     selectedPublicationIds.value = publishablePublications.value.map((p) => p.id);
 }
+
+watch(
+    () => form.publications.map((row) => `${row.id}:${row.queued_publish_at ?? ''}`),
+    () => {
+        prunePublicationSelection();
+    },
+);
 
 function selectNoPublishable() {
     selectedPublicationIds.value = [];
@@ -133,6 +175,8 @@ watch(
         form.title = video.title;
         form.notes = video.notes || '';
         form.caption_ai_provider = video.caption_ai_provider ?? 'ollama_local';
+        form.caption_ollama_target = video.caption_ollama_target ?? 'local';
+        form.caption_ai_model = video.caption_ai_model ?? 'qwen3:14b';
         form.thumbnail = null;
         thumbnailPreview.value = null;
         form.publications = video.publications.map((p) => ({
@@ -192,6 +236,8 @@ function save() {
             title: data.title,
             notes: data.notes,
             caption_ai_provider: data.caption_ai_provider,
+            caption_ollama_target: data.caption_ollama_target,
+            caption_ai_model: data.caption_ai_model,
             publications: data.publications,
             _method: 'put',
         };
@@ -327,9 +373,11 @@ function publishSelected() {
 
     postSocialPublish(route('videos.publish-all', props.video.id), {
         ...payload(),
-        publication_ids: selectedPublicationIds.value.filter((id) =>
-            publishablePublications.value.some((p) => p.id === id),
-        ),
+        publication_ids: selectedPublicationIds.value.filter((id) => {
+            const pub = props.video.publications.find((p) => p.id === id);
+
+            return pub !== undefined && isPublishable(pub);
+        }),
     });
 }
 
@@ -502,26 +550,36 @@ function openSchedulePicker(event) {
                 </div>
 
                 <div>
-                    <label class="mb-2 block text-sm text-slate-300">Generación de textos</label>
-                    <select
-                        v-model="form.caption_ai_provider"
-                        class="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-sm"
-                    >
-                        <option
-                            v-for="opt in captionAiOptions"
-                            :key="opt.value"
-                            :value="opt.value"
-                            :disabled="opt.disabled"
-                        >
-                            {{ opt.label }}
-                        </option>
-                    </select>
-                    <p class="mt-1.5 text-xs text-slate-500">
-                        {{
-                            captionAiOptions.find((o) => o.value === form.caption_ai_provider)?.hint
-                                ?? video.caption_ai_provider_label
-                        }}
-                    </p>
+                    <p class="mb-3 text-sm text-slate-300">Generación de textos</p>
+                    <div class="space-y-2">
+                        <div v-for="opt in captionAiOptions" :key="opt.value">
+                            <label
+                                class="flex cursor-pointer gap-3 rounded-xl border border-slate-800 px-4 py-3 hover:bg-slate-900"
+                                :class="opt.disabled ? 'cursor-not-allowed opacity-50' : ''"
+                            >
+                                <input
+                                    v-model="form.caption_ai_provider"
+                                    type="radio"
+                                    name="caption_ai_provider"
+                                    :value="opt.value"
+                                    :disabled="opt.disabled"
+                                    class="mt-1"
+                                />
+                                <span class="text-sm">
+                                    <span class="font-medium text-slate-200">{{ opt.label }}</span>
+                                    <span class="mt-0.5 block text-xs text-slate-500">{{ opt.hint }}</span>
+                                </span>
+                            </label>
+                            <VideoOllamaCaptionFields
+                                v-if="opt.value === 'ollama_local'"
+                                v-model:target="form.caption_ollama_target"
+                                v-model:model="form.caption_ai_model"
+                                :ollama="captionAiDefaults.ollama ?? {}"
+                                :enabled="form.caption_ai_provider === 'ollama_local'"
+                                nested
+                            />
+                        </div>
+                    </div>
                 </div>
 
                 <div>

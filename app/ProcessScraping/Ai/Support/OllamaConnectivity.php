@@ -4,6 +4,7 @@ namespace App\ProcessScraping\Ai\Support;
 
 use App\ProcessScraping\Support\ScraperArticleAiContext;
 use App\SocialPublishing\Enums\VideoCaptionAiProvider;
+use App\SocialPublishing\Support\VideoCaptionOllamaContext;
 
 final class OllamaConnectivity
 {
@@ -26,6 +27,10 @@ final class OllamaConnectivity
             && ScraperArticleAiContext::usesScraperOllamaRouting()
         ) {
             return self::baseUrlForTarget(ScraperArticleAiContext::ollamaTarget());
+        }
+
+        if (VideoCaptionOllamaContext::usesVideoOllamaRouting()) {
+            return self::baseUrlForTarget(VideoCaptionOllamaContext::ollamaTarget());
         }
 
         return self::baseUrlForTarget(self::TARGET_LOCAL);

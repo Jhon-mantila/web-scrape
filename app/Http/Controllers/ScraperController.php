@@ -19,6 +19,7 @@ use App\SocialPublishing\Enums\VideoCaptionAiProvider;
 use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
+use App\Scraper\Actions\DeleteFullyPublishedScraperNewsAction;
 use App\Scraper\Support\NewsScraperStats;
 use App\SendWordpress\Actions\AttachWordpressFeaturedImagesAction;
 use App\SendWordpress\Actions\SyncWordpressScraperStatusAction;
@@ -44,6 +45,7 @@ class ScraperController extends Controller
         $pendingWordpress = $request->boolean('pending_wordpress');
         $pendingAi = $request->boolean('pending_ai');
         $scheduledWp = $request->boolean('scheduled_wp');
+        $publishedWp = $request->boolean('published_wp');
         $failedOnly = $request->boolean('failed');
         $perPage = (int) $request->query('per_page', 15);
 
@@ -88,6 +90,14 @@ class ScraperController extends Controller
             $query->whereHas('aiArticle', fn ($articles) => $articles->where('wordpress_status', 'future'));
         }
 
+        if ($publishedWp) {
+            $query->whereHas('aiArticle', function ($articles) {
+                $articles
+                    ->where('sent_wordpress', true)
+                    ->where('wordpress_status', 'publish');
+            });
+        }
+
         if ($failedOnly) {
             $query->where(function ($builder) {
                 $builder
@@ -104,6 +114,7 @@ class ScraperController extends Controller
                 'pending_wordpress' => $pendingWordpress,
                 'pending_ai' => $pendingAi,
                 'scheduled_wp' => $scheduledWp,
+                'published_wp' => $publishedWp,
                 'failed' => $failedOnly,
                 'per_page' => $perPage,
             ],
@@ -315,6 +326,32 @@ class ScraperController extends Controller
 
             return back()->with('error', 'Error al descargar imágenes: '.$exception->getMessage());
         }
+    }
+
+    public function purgePublishedCount(DeleteFullyPublishedScraperNewsAction $action): JsonResponse
+    {
+        return response()->json([
+            'count' => $action->countEligible(),
+        ]);
+    }
+
+    public function purgePublished(DeleteFullyPublishedScraperNewsAction $action): RedirectResponse
+    {
+        $count = $action->countEligible();
+
+        if ($count === 0) {
+            return back()->with('error', 'No hay noticias publicadas en WP con pipeline completo para borrar.');
+        }
+
+        $summary = $action->execute();
+
+        $message = sprintf(
+            'Eliminadas %d noticia(s) del scraper (imágenes locales: %d). Los posts en WordPress no se borraron.',
+            $summary['news_deleted'],
+            $summary['images_deleted'],
+        );
+
+        return back()->with('success', $message);
     }
 
     public function syncWordpressStatus(SyncWordpressScraperStatusAction $action): RedirectResponse

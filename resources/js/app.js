@@ -4,6 +4,7 @@ import { createInertiaApp, router } from '@inertiajs/vue3';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { ZiggyVue } from '../../vendor/tightenco/ziggy';
 import PipelineRunOverlay from '@/Components/PipelineRunOverlay.vue';
+import PlatformTokenAlertBanner from '@/Components/PlatformTokenAlertBanner.vue';
 import { applyBackgroundSnapshot, setPanelCollapsed } from '@/stores/backgroundRunStore.js';
 import { backgroundRunSnapshotFromPage } from '@/support/backgroundRun.js';
 
@@ -25,7 +26,11 @@ createInertiaApp({
     setup({ el, App, props, plugin }) {
         const vueApp = createApp({
             render: () =>
-                h('div', { class: 'contents' }, [h(App, props), h(PipelineRunOverlay)]),
+                h('div', { class: 'contents' }, [
+                    h(App, props),
+                    h(PlatformTokenAlertBanner),
+                    h(PipelineRunOverlay),
+                ]),
         });
 
         vueApp.use(plugin);

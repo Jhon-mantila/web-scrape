@@ -1,7 +1,16 @@
 <script setup>
+import { backgroundRunState, hasBackgroundActivity } from '@/stores/backgroundRunStore.js';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 const visible = ref(false);
+
+const backgroundPanelOpen = computed(
+    () => hasBackgroundActivity() && !backgroundRunState.panelCollapsed,
+);
+
+const bottomClass = computed(() =>
+    hasBackgroundActivity() ? 'bottom-28' : 'bottom-6',
+);
 
 const enabled = computed(() => {
     const current = route().current();
@@ -46,9 +55,10 @@ onUnmounted(() => {
         leave-to-class="translate-y-2 opacity-0"
     >
         <button
-            v-if="enabled && visible"
+            v-if="enabled && visible && !backgroundPanelOpen"
             type="button"
-            class="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full border border-violet-500/40 bg-slate-900/95 px-4 py-2.5 text-sm font-medium text-violet-200 shadow-lg shadow-black/30 backdrop-blur hover:border-violet-400 hover:bg-violet-950/90 hover:text-white"
+            class="fixed right-6 z-40 flex items-center gap-2 rounded-full border border-violet-500/40 bg-slate-900/95 px-4 py-2.5 text-sm font-medium text-violet-200 shadow-lg shadow-black/30 backdrop-blur hover:border-violet-400 hover:bg-violet-950/90 hover:text-white"
+            :class="bottomClass"
             aria-label="Volver al inicio"
             @click="scrollToTop"
         >

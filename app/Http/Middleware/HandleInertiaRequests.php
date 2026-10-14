@@ -3,6 +3,8 @@
 namespace App\Http\Middleware;
 
 use App\ProcessScraping\Support\PipelineRunState;
+use App\SocialPublishing\Support\PlatformConnectionAlertService;
+use App\SocialPublishing\Support\PlatformTokenAlertService;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -37,6 +39,12 @@ class HandleInertiaRequests extends Middleware
             'pipelineRun' => fn () => $request->user()
                 ? PipelineRunState::snapshot($request->user()->id)
                 : null,
+            'platformTokenAlerts' => fn () => $request->user()
+                ? app(PlatformTokenAlertService::class)->collect()
+                : [],
+            'platformConnectionAlerts' => fn () => $request->user()
+                ? app(PlatformConnectionAlertService::class)->collect()
+                : [],
         ];
     }
 }

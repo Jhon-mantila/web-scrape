@@ -62,6 +62,11 @@ return [
         'article_ollama_target' => env('SCRAPER_ARTICLE_OLLAMA_TARGET', 'local'),
     ],
 
+    'videos' => [
+        'caption_ai_default_model' => env('VIDEO_CAPTION_AI_MODEL', env('SCRAPER_ARTICLE_AI_MODEL', env('OLLAMA_MODEL', 'qwen3:14b'))),
+        'caption_ollama_target' => env('VIDEO_CAPTION_OLLAMA_TARGET', env('SCRAPER_ARTICLE_OLLAMA_TARGET', 'local')),
+    ],
+
     'deepseek' => [
         'api_key' => env('DEEPSEEK_API_KEY'),
         'base_url' => env('DEEPSEEK_BASE_URL', 'https://api.deepseek.com'),

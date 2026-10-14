@@ -9,6 +9,7 @@ use App\SocialPublishing\DTO\PublishResult;
 use App\SocialPublishing\Platforms\Facebook\FacebookLinkPublisher;
 use App\SocialPublishing\Platforms\LinkedIn\LinkedInLinkPublisher;
 use App\SocialPublishing\Platforms\LinkedIn\LinkedInTokenService;
+use App\SocialPublishing\Support\RegisterPlatformTokenFailure;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
@@ -78,6 +79,8 @@ class PublishSocialArticleAction
                 'last_error' => null,
             ]);
         } else {
+            RegisterPlatformTokenFailure::fromPlatform($platform, $result->error);
+
             $publication->update([
                 'status' => PublicationStatus::Failed,
                 'external_id' => $result->externalId,
