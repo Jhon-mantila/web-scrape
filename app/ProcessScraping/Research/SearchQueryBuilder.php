@@ -17,8 +17,9 @@ class SearchQueryBuilder
         }
 
         if ($source === 'anime_news') {
-            $queries[] = $cleanTitle.' anime';
-            $queries[] = $cleanTitle.' anime news español';
+            $queries[] = $cleanTitle.' -site:animenewsnetwork.com';
+            $queries[] = $cleanTitle.' anime doblaje latino';
+            $queries[] = $cleanTitle.' crunchyroll latinoamérica';
         } elseif ($category !== null && $category !== '') {
             $queries[] = $cleanTitle.' '.$category;
         } else {
@@ -53,6 +54,7 @@ class SearchQueryBuilder
         $keywords = [
             'temporada', 'trailer', 'estreno', 'película', 'pelicula', 'anime',
             'manga', 'studio', 'studios', 'crunchyroll', 'netflix',
+            'season', 'premiere', 'film', 'movie', 'streaming', 'cast', 'director',
         ];
 
         foreach ($keywords as $keyword) {

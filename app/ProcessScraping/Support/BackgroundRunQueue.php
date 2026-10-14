@@ -2,6 +2,7 @@
 
 namespace App\ProcessScraping\Support;
 
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
@@ -221,13 +222,16 @@ class BackgroundRunQueue
             }
         }
 
+        $finishedAt = now();
+
         self::mergeRun($userId, $runId, [
             'status' => $failed ? 'failed' : 'completed',
             'steps' => $steps,
             'current_step' => null,
             'summary' => $summary,
             'message' => $message,
-            'finished_at' => now()->toIso8601String(),
+            'finished_at' => $finishedAt->toIso8601String(),
+            'duration_seconds' => self::durationSeconds($run['started_at'] ?? null, $finishedAt),
         ]);
 
         self::reindexQueuePositions($userId);
@@ -235,10 +239,14 @@ class BackgroundRunQueue
 
     public static function failRun(int $userId, string $runId, string $message): void
     {
+        $run = self::find($userId, $runId);
+        $finishedAt = now();
+
         self::mergeRun($userId, $runId, [
             'status' => 'failed',
             'message' => $message,
-            'finished_at' => now()->toIso8601String(),
+            'finished_at' => $finishedAt->toIso8601String(),
+            'duration_seconds' => self::durationSeconds($run['started_at'] ?? null, $finishedAt),
         ]);
 
         self::reindexQueuePositions($userId);
@@ -325,6 +333,21 @@ class BackgroundRunQueue
     private static function cacheKey(int $userId): string
     {
         return "background_runs:user:{$userId}";
+    }
+
+    private static function durationSeconds(?string $startedAt, Carbon $finishedAt): ?int
+    {
+        if ($startedAt === null || trim($startedAt) === '') {
+            return null;
+        }
+
+        try {
+            $started = Carbon::parse($startedAt);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return max(0, (int) round($started->diffInSeconds($finishedAt)));
     }
 
     /**

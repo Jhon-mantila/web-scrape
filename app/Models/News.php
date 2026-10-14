@@ -15,6 +15,7 @@ class News extends Model
         'snippet',
         'category',
         'status_ia',
+        'merged_into_news_id',
     ];
 
     public function detail(): HasOne

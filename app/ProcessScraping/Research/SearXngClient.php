@@ -58,6 +58,7 @@ class SearXngClient
             ]);
         }
 
+        $results = $this->excludeBlockedDomains($results);
         $results = $this->filterRelevantResults($results, $query);
 
         return array_values(array_slice(array_map(function (array $item): array {
@@ -74,6 +75,33 @@ class SearXngClient
      * @param  list<array<string, mixed>>  $results
      * @return list<array<string, mixed>>
      */
+    /**
+     * @param  list<array<string, mixed>>  $results
+     * @return list<array<string, mixed>>
+     */
+    private function excludeBlockedDomains(array $results): array
+    {
+        $blocked = [
+            'animenewsnetwork.com',
+            'www.animenewsnetwork.com',
+        ];
+
+        return array_values(array_filter(
+            $results,
+            function (array $item) use ($blocked): bool {
+                $url = mb_strtolower((string) ($item['url'] ?? ''));
+
+                foreach ($blocked as $domain) {
+                    if (str_contains($url, $domain)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            },
+        ));
+    }
+
     private function filterRelevantResults(array $results, string $query): array
     {
         $queryWords = array_values(array_filter(

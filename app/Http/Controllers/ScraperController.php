@@ -17,6 +17,7 @@ use App\ProcessScraping\Ai\Support\AiSettings;
 use App\ProcessScraping\Support\ScraperArticleAiContext;
 use App\SocialPublishing\Enums\VideoCaptionAiProvider;
 use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
+use App\ProcessScraping\Support\ArticleWordCounter;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
 use App\Scraper\Actions\DeleteFullyPublishedScraperNewsAction;
@@ -652,6 +653,8 @@ class ScraperController extends Controller
             'ai' => $ai ? [
                 'generated_title' => $ai->generated_title,
                 'can_preview' => filled($ai->body_html),
+                'word_count' => ArticleWordCounter::fromHtml($ai->body_html),
+                'min_word_count' => (int) config('services.scraper.anime_news_min_words', 350),
                 ...$this->wordpressAiPayload($ai),
             ] : null,
         ];
@@ -705,6 +708,8 @@ class ScraperController extends Controller
             ...$this->wordpressAiPayload($ai),
             'image_source' => $news->detail?->featured_image_source,
             'can_regenerate' => ! $ai->sent_wordpress && $news->detail?->status === 'processed',
+            'word_count' => ArticleWordCounter::fromHtml($ai->body_html),
+            'min_word_count' => (int) config('services.scraper.anime_news_min_words', 350),
         ];
     }
 

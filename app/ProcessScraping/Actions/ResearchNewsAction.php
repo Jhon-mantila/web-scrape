@@ -3,9 +3,13 @@
 namespace App\ProcessScraping\Actions;
 
 use App\Models\News;
+use App\ProcessScraping\Research\AnimeNewsResearchOrchestrator;
 use App\ProcessScraping\Research\ResearchContextFormatter;
 use App\ProcessScraping\Research\SearXngClient;
 use App\ProcessScraping\Research\SearchQueryBuilder;
+use App\ProcessScraping\Ai\OllamaModelSelector;
+use App\ProcessScraping\Support\ScraperArticleAiContext;
+use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -15,6 +19,9 @@ class ResearchNewsAction
         private readonly SearXngClient $searxng,
         private readonly SearchQueryBuilder $queryBuilder,
         private readonly ResearchContextFormatter $formatter,
+        private readonly AnimeNewsResearchOrchestrator $animeNewsResearch,
+        private readonly VideoCaptionAiClientFactory $clientFactory,
+        private readonly OllamaModelSelector $modelSelector,
     ) {}
 
     /**
@@ -51,6 +58,7 @@ class ResearchNewsAction
                 $news->detail?->update([
                     'research_context' => $result['context'],
                     'research_raw' => $result['raw'],
+                    'fact_sheet' => null,
                     'researched_at' => now(),
                 ]);
 
@@ -118,6 +126,13 @@ class ResearchNewsAction
             return null;
         }
 
+        if ($news->source === 'anime_news' && config('services.scraper.anime_news_staged')) {
+            $llm = $this->clientFactory->client(ScraperArticleAiContext::get());
+            $model = $this->modelSelector->forNews($news, $detail->content_text);
+
+            return $this->animeNewsResearch->gather($news, $llm, $model);
+        }
+
         $queries = $this->queryBuilder->build(
             $news->title,
             $detail->content_text,
@@ -141,7 +156,7 @@ class ResearchNewsAction
 
         return [
             'context' => $context,
-            'raw' => $searches,
+            'raw' => ['mode' => 'legacy', 'searches' => $searches],
         ];
     }
 }

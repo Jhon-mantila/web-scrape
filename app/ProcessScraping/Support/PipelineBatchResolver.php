@@ -19,6 +19,11 @@ class PipelineBatchResolver
             ->whereNotNull('nd.raw_html')
             ->whereNotNull('nd.content_text')
             ->where('nd.status', 'processed')
+            ->whereNull('news.merged_into_news_id')
+            ->where(function ($q) {
+                $q->whereNull('news.status_ia')
+                    ->orWhereNotIn('news.status_ia', ['merged', 'skipped_low_interest', 'skipped_quality', 'skipped_short']);
+            })
             ->orderBy('news.id');
 
         if (! $force) {

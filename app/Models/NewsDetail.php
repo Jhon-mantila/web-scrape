@@ -15,6 +15,8 @@ class NewsDetail extends Model
         'featured_image_source',
         'research_context',
         'research_raw',
+        'fact_sheet',
+        'grouped_sources',
         'researched_at',
         'content_text',
         'attempt_count',
@@ -28,6 +30,8 @@ class NewsDetail extends Model
         'processed_at' => 'datetime',
         'researched_at' => 'datetime',
         'research_raw' => 'array',
+        'fact_sheet' => 'array',
+        'grouped_sources' => 'array',
     ];
 
     public function news(): BelongsTo

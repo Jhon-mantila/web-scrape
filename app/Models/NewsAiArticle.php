@@ -23,9 +23,11 @@ class NewsAiArticle extends Model
         'wordpress_author',
         'model',
         'article_type',
+        'generated_tags',
     ];
 
     protected $casts = [
+        'generated_tags' => 'array',
         'sent_wordpress' => 'boolean',
         'sent_wordpress_at' => 'datetime',
         'wordpress_scheduled_at' => 'datetime',

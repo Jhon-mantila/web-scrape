@@ -25,6 +25,7 @@ class RunNewsPipelineAction
         private readonly ComfyUIClient $comfyui,
         private readonly VideoCaptionAiClientFactory $clientFactory,
         private readonly PipelineBatchResolver $batchResolver,
+        private readonly ApplyAnimeNewsEditorialGateAction $editorialGate,
     ) {}
 
     /**
@@ -33,6 +34,7 @@ class RunNewsPipelineAction
      *     details: array{processed: int, success: int, failed: int},
      *     images: array{processed: int, downloaded: int, generated: int, success: int, skipped: int, failed: int},
      *     research: array{processed: int, success: int, skipped: int, failed: int},
+     *     editorial: array{filtered: int, grouped: int, groups: int},
      *     ai: array{processed: int, success: int, failed: int, news_ids: list<int>, errors: list<array{news_id: int, message: string}>},
      *     wordpress: array{processed: int, success: int, failed: int, scheduled: list<mixed>, by_author: array<string, int>},
      *     timings: array<string, float>
@@ -108,6 +110,28 @@ class RunNewsPipelineAction
             );
         }
 
+        $editorial = ['filtered' => 0, 'grouped' => 0, 'groups' => 0];
+
+        if (config('services.scraper.anime_news_staged')) {
+            $this->progressBegin($progressUserId, 'editorial', 'Filtro y agrupación editorial…');
+            $stepStarted = microtime(true);
+            $gate = $this->editorialGate->execute($batchIds);
+            $batchIds = $gate['eligible_ids'];
+            $editorial = [
+                'filtered' => $gate['filtered'],
+                'grouped' => $gate['grouped'],
+                'groups' => $gate['groups'],
+            ];
+            $timings['editorial'] = microtime(true) - $stepStarted;
+            $this->progressFinish(
+                $progressUserId,
+                'editorial',
+                "Editorial: {$editorial['filtered']} descartadas · {$editorial['grouped']} agrupadas",
+            );
+        } else {
+            $this->progressSkip($progressUserId, 'editorial');
+        }
+
         if (! ScraperArticleAiContext::usesAi()) {
             $ai = [
                 'processed' => 0,
@@ -164,6 +188,7 @@ class RunNewsPipelineAction
             'details' => $details,
             'images' => $images,
             'research' => $research,
+            'editorial' => $editorial,
             'ai' => $ai,
             'wordpress' => $wordpress,
             'timings' => $timings,

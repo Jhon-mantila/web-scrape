@@ -5,11 +5,15 @@ namespace App\SendWordpress\Actions;
 use App\Models\NewsAiArticle;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
+use App\SendWordpress\Support\WordpressArticleFooter;
+use App\SendWordpress\Support\WordpressCategoryTranslator;
 use App\SendWordpress\Support\WordpressFeaturedMediaUploader;
+use App\SendWordpress\Support\WordpressInternalLinksInjector;
 use App\SendWordpress\Support\WordpressPostMetaParser;
 use App\SendWordpress\WordPressAccount;
 use App\SendWordpress\WordPressAccountPool;
 use App\SendWordpress\WordPressClient;
+use App\SendWordpress\WordPressDailyPostQuota;
 use App\SendWordpress\WordPressSchedulePlanner;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -22,8 +26,10 @@ class SendPostToWordpressAction
         private readonly WordPressClient $client,
         private readonly WordpressFeaturedMediaUploader $featuredMediaUploader,
         private readonly WordPressSchedulePlanner $schedulePlanner,
+        private readonly WordPressDailyPostQuota $dailyQuota,
         private readonly WordPressAccountPool $accountPool,
         private readonly WordpressPostMetaParser $postMetaParser,
+        private readonly WordpressInternalLinksInjector $internalLinks,
     ) {}
 
     /**
@@ -61,14 +67,27 @@ class SendPostToWordpressAction
             $accountIndex++;
 
             try {
-                $status = match ($mode) {
+                $effectiveMode = $mode;
+
+                if ($mode === 'publish' && ! $this->dailyQuota->hasCapacityToday()) {
+                    $effectiveMode = 'schedule';
+                    Log::info('wordpress: cupo diario lleno; publicación inmediata reprogramada', [
+                        'news_id' => $article->news_id,
+                        'max_per_day' => $this->dailyQuota->maxPerDay(),
+                    ]);
+                }
+
+                $status = match ($effectiveMode) {
                     'draft' => 'draft',
                     'publish' => 'publish',
                     'schedule' => 'future',
                     default => 'draft'
                 };
 
-                $categoryName = $article->news->category ?? 'General';
+                $categoryName = WordpressCategoryTranslator::forNews(
+                    $article->news->category,
+                    $article->news->source,
+                );
                 $categoryId = $this->client->getOrCreateCategory($categoryName, $account);
 
                 $allowedEmbeds = YoutubeExtractor::collect(
@@ -79,15 +98,24 @@ class SendPostToWordpressAction
 
                 $postTitle = trim((string) ($article->generated_title ?? ''));
 
+                $sanitizedBody = HtmlArticleSanitizer::sanitize($article->body_html ?? '', $allowedEmbeds);
+                $tagIds = $this->resolveTagIds($article, $account);
+                $sanitizedBody = $this->internalLinks->inject($sanitizedBody, $tagIds, $this->client, $account);
+                $bodyWithFooter = WordpressArticleFooter::append($sanitizedBody, $article);
+
                 $payload = [
                     'title' => $postTitle,
-                    'content' => HtmlArticleSanitizer::sanitize($article->body_html, $allowedEmbeds),
+                    'content' => $bodyWithFooter,
                     'excerpt' => $article->excerpt,
                     'status' => $status,
                     'categories' => [$categoryId],
                 ];
 
-                if ($mode === 'schedule') {
+                if ($tagIds !== []) {
+                    $payload['tags'] = $tagIds;
+                }
+
+                if ($effectiveMode === 'schedule') {
                     $scheduledAt = $this->schedulePlanner->nextScheduledAt();
                     $payload['date'] = $scheduledAt->toIso8601String();
                     $scheduled[] = [
@@ -125,7 +153,11 @@ class SendPostToWordpressAction
 
                 $meta = $this->postMetaParser->fromApiPost($response);
 
-                if ($mode === 'schedule' && $meta['scheduled_at'] === null && isset($payload['date'])) {
+                if ($effectiveMode === 'publish') {
+                    $this->dailyQuota->registerPostOn(Carbon::now($this->dailyQuota->timezone()));
+                }
+
+                if ($effectiveMode === 'schedule' && $meta['scheduled_at'] === null && isset($payload['date'])) {
                     $timezone = (string) config('services.wordpress.schedule_timezone', config('app.timezone', 'UTC'));
                     $meta['scheduled_at'] = Carbon::parse((string) $payload['date'], $timezone);
                 }
@@ -148,7 +180,8 @@ class SendPostToWordpressAction
                     'news_ai_id' => $article->id,
                     'news_id' => $article->news_id,
                     'author' => $account->user,
-                    'mode' => $mode,
+                    'mode' => $effectiveMode,
+                    'requested_mode' => $mode,
                     'scheduled_at' => $payload['date'] ?? null,
                 ]);
 
@@ -171,5 +204,47 @@ class SendPostToWordpressAction
             'scheduled' => $scheduled,
             'by_author' => $byAuthor,
         ];
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function resolveTagIds(NewsAiArticle $article, WordPressAccount $account): array
+    {
+        $names = $article->generated_tags ?? [];
+
+        if (! is_array($names) || $names === []) {
+            $sheet = $article->news?->detail?->fact_sheet;
+
+            if (is_array($sheet) && ! empty($sheet['franchise'])) {
+                $names = [(string) $sheet['franchise']];
+            }
+        }
+
+        $ids = [];
+
+        foreach ($names as $name) {
+            if (! is_string($name)) {
+                continue;
+            }
+
+            $name = trim($name);
+
+            if ($name === '' || mb_strlen($name) > 80) {
+                continue;
+            }
+
+            try {
+                $ids[] = $this->client->getOrCreateTag($name, $account);
+            } catch (Throwable $e) {
+                Log::warning('wordpress: etiqueta omitida', [
+                    'news_id' => $article->news_id,
+                    'tag' => $name,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return array_values(array_unique(array_filter($ids)));
     }
 }

@@ -212,7 +212,7 @@ class DownloadFeaturedImagesAction
         $finalPath = null;
 
         if (FeaturedImageWatermarker::canProcess()) {
-            $finalPath = $this->watermarker->apply($path);
+            $finalPath = $this->watermarker->normalizeDownloaded($path);
         }
 
         if ($finalPath === null || ! FeaturedImageValidator::isValidRelativePath($finalPath)) {
@@ -316,6 +316,34 @@ class DownloadFeaturedImagesAction
                 Storage::disk('public')->delete($path);
             }
         }
+    }
+
+    /**
+     * Borra archivos locales de destacada y limpia el detalle (p. ej. artículo demasiado corto).
+     */
+    public function removeFeaturedImage(News $news): void
+    {
+        $news->loadMissing('detail');
+        $disk = Storage::disk('public');
+
+        $path = $news->detail?->featured_image_path;
+
+        if (is_string($path) && $path !== '' && $disk->exists($path)) {
+            $disk->delete($path);
+        }
+
+        foreach (['webp', 'jpg', 'jpeg', 'png', 'gif'] as $extension) {
+            $candidate = "featured-images/{$news->id}.{$extension}";
+
+            if ($disk->exists($candidate)) {
+                $disk->delete($candidate);
+            }
+        }
+
+        $news->detail?->update([
+            'featured_image_path' => null,
+            'featured_image_source' => null,
+        ]);
     }
 
     public function ensureFeaturedImageReady(News $news, bool $skipGenerate = false): ?string

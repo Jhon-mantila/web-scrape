@@ -3,6 +3,7 @@
 namespace App\ProcessScraping\Ai;
 
 use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
+use App\ProcessScraping\Ai\Support\AiGenerationOptions;
 use App\ProcessScraping\Ai\Support\AiHttpErrorMapper;
 use App\ProcessScraping\Ai\Support\AiSettings;
 use Illuminate\Support\Facades\Http;
@@ -15,8 +16,12 @@ abstract class OpenAiCompatibleChatClient implements TextGenerationClient
 
     abstract protected function apiKey(): string;
 
-    public function generate(string $system, string $prompt, ?string $model = null): string
-    {
+    public function generate(
+        string $system,
+        string $prompt,
+        ?string $model = null,
+        ?AiGenerationOptions $options = null,
+    ): string {
         $model ??= AiSettings::defaultModel();
         $url = rtrim($this->baseUrl(), '/').'/chat/completions';
 
@@ -26,12 +31,14 @@ abstract class OpenAiCompatibleChatClient implements TextGenerationClient
                 ['role' => 'system', 'content' => $system],
                 ['role' => 'user', 'content' => $prompt],
             ],
-            'temperature' => AiSettings::temperature(),
+            'temperature' => $options?->temperature ?? AiSettings::temperature(),
             'max_tokens' => AiSettings::maxTokens(),
             'stream' => false,
         ];
 
-        if (AiSettings::formatJson()) {
+        $formatJson = $options?->formatJson ?? AiSettings::formatJson();
+
+        if ($formatJson) {
             $payload['response_format'] = ['type' => 'json_object'];
         }
 

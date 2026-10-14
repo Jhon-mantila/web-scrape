@@ -1374,6 +1374,15 @@ function closePreview() {
                                     @click="openPreview(item)"
                                 >
                                     Vista previa WordPress
+                                    <span
+                                        v-if="item.ai?.word_count != null"
+                                        class="ml-1 tabular-nums"
+                                        :class="item.ai.word_count >= (item.ai.min_word_count ?? 350)
+                                            ? 'text-emerald-400'
+                                            : 'text-amber-400'"
+                                    >
+                                        · {{ item.ai.word_count }} palabras
+                                    </span>
                                 </button>
                             </div>
                         </div>
@@ -1486,6 +1495,18 @@ function closePreview() {
                                 <span v-if="previewData.source">· {{ previewData.source }}</span>
                                 <span v-if="previewData.model">· Modelo: {{ previewData.model }}</span>
                                 <span v-if="previewData.image_source">· Imagen: {{ previewData.image_source }}</span>
+                                <span
+                                    v-if="previewData.word_count != null"
+                                    class="font-medium tabular-nums"
+                                    :class="previewData.word_count >= (previewData.min_word_count ?? 350)
+                                        ? 'text-emerald-400'
+                                        : 'text-amber-400'"
+                                >
+                                    · {{ previewData.word_count }} palabras
+                                    <template v-if="previewData.min_word_count">
+                                        (mín. {{ previewData.min_word_count }})
+                                    </template>
+                                </span>
                                 <span
                                     v-if="previewData.sent_wordpress && previewData.wordpress_status === 'future'"
                                     class="text-sky-400"

@@ -60,7 +60,7 @@ class PromptLibrary
             'rumor' => 'Recuerda marcar en el texto que la información no está confirmada oficialmente.',
             'polemica' => 'Presenta los hechos antes que la opinión; sé equilibrado aunque el tono sea directo.',
             'homenaje' => 'Evita cualquier tono humorístico o sensacionalista.',
-            default => 'Si el contenido lo permite, cierra con una frase que conecte con la comunidad fan.',
+            default => 'Cierra con una frase breve que resuma el dato más relevante para el lector, sin pedir comentarios ni opinión.',
         };
     }
 }

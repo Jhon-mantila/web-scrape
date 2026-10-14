@@ -3,6 +3,7 @@
 namespace App\ProcessScraping\Ai;
 
 use App\ProcessScraping\Ai\Contracts\TextGenerationClient;
+use App\ProcessScraping\Ai\Support\AiGenerationOptions;
 use App\ProcessScraping\Ai\Support\AiHttpErrorMapper;
 use App\ProcessScraping\Ai\Support\AiSettings;
 use App\ProcessScraping\Ai\Support\OllamaConnectivity;
@@ -12,8 +13,12 @@ use RuntimeException;
 
 class OllamaClient implements TextGenerationClient
 {
-    public function generate(string $system, string $prompt, ?string $model = null): string
-    {
+    public function generate(
+        string $system,
+        string $prompt,
+        ?string $model = null,
+        ?AiGenerationOptions $options = null,
+    ): string {
         $url = OllamaConnectivity::resolveBaseUrl().'/api/generate';
         $model ??= AiSettings::defaultModel();
 
@@ -24,7 +29,9 @@ class OllamaClient implements TextGenerationClient
             'stream' => false,
         ];
 
-        if (AiSettings::formatJson()) {
+        $formatJson = $options?->formatJson ?? AiSettings::formatJson();
+
+        if ($formatJson) {
             $payload['format'] = 'json';
         }
 
@@ -32,14 +39,16 @@ class OllamaClient implements TextGenerationClient
             $payload['think'] = false;
         }
 
-        $options = array_filter([
-            'temperature' => AiSettings::temperature(),
+        $temperature = $options?->temperature ?? AiSettings::temperature();
+
+        $ollamaOptions = array_filter([
+            'temperature' => $temperature,
             'num_ctx' => (int) config('services.ollama.num_ctx'),
             'num_predict' => AiSettings::maxTokens(),
         ], fn ($value) => $value !== null && $value !== 0 && $value !== '');
 
-        if ($options !== []) {
-            $payload['options'] = $options;
+        if ($ollamaOptions !== []) {
+            $payload['options'] = $ollamaOptions;
         }
 
         try {

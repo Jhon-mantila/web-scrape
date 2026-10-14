@@ -24,12 +24,7 @@ class ArticleGenerationPrompt
         $extraInstructions = '';
 
         if ($source === 'anime_news') {
-            $extraInstructions = <<<TXT
-            CONTEXTO DE FUENTE:
-            - Noticia proveniente de un medio en inglés (tipo Anime News Network).
-            - Traduce y adapta al español. Respeta fechas, declaraciones y fuentes.
-            - Si hay citas, parafraséalas; no las traduzcas literal.
-            TXT;
+            $extraInstructions = AnimeNewsWritingGuidelines::sourceContext();
         }
 
         if ($source === 'esquinaweb') {
@@ -59,14 +54,16 @@ class ArticleGenerationPrompt
             $blocks[] = 'INVESTIGACIÓN WEB COMPLEMENTARIA (SearXNG; úsala para enriquecer el artículo):';
             $blocks[] = PromptContextLimiter::contentText($researchContext, 3000);
             $blocks[] = '';
-            $blocks[] = <<<'TXT'
-            INSTRUCCIONES SOBRE LA INVESTIGACIÓN:
-            - Refuerza el artículo con datos útiles del bloque anterior: fechas, cifras, nombres, contexto adicional o confirmaciones cruzadas.
-            - Integra esos hechos de forma natural en el texto; no los copies como lista ni pegues extractos literales.
-            - Si la investigación contradice la fuente scrapeada, prioriza siempre el contenido de referencia.
-            - No inventes información que no aparezca en la fuente ni en la investigación.
-            - Si un dato de la investigación aporta valor (antecedentes, reacciones, detalles de estreno, etc.), inclúyelo en el cuerpo del artículo.
-            TXT;
+            $blocks[] = $source === 'anime_news'
+                ? AnimeNewsWritingGuidelines::researchInstructions()
+                : <<<'TXT'
+                INSTRUCCIONES SOBRE LA INVESTIGACIÓN:
+                - Refuerza el artículo con datos útiles del bloque anterior: fechas, cifras, nombres, contexto adicional o confirmaciones cruzadas.
+                - Integra esos hechos de forma natural en el texto; no los copies como lista ni pegues extractos literales.
+                - Si la investigación contradice la fuente scrapeada, prioriza siempre el contenido de referencia.
+                - No inventes información que no aparezca en la fuente ni en la investigación.
+                - Si un dato de la investigación aporta valor (antecedentes, reacciones, detalles de estreno, etc.), inclúyelo en el cuerpo del artículo.
+                TXT;
         }
 
         if ($rawHtml !== null && $rawHtml !== '') {
@@ -95,29 +92,34 @@ class ArticleGenerationPrompt
         $blocks[] = 'TIPO DE ARTÍCULO DETECTADO: '.$type;
         $blocks[] = $toneExtra;
 
-        $writingInstructions = <<<'TXT'
-        Escribe un artículo propio para EsquinaAnime basado en el contenido de referencia.
-        No copies párrafos literales: reescríbelo con tu voz.
-        TXT;
+        if ($source === 'anime_news') {
+            $blocks[] = AnimeNewsWritingGuidelines::structureAndStyle();
+        } else {
+            $writingInstructions = <<<'TXT'
+            Escribe un artículo propio para EsquinaAnime basado en el contenido de referencia.
+            No copies párrafos literales: reescríbelo con tu voz.
+            TXT;
 
-        if ($hasResearch) {
-            $writingInstructions .= <<<'TXT'
+            if ($hasResearch) {
+                $writingInstructions .= <<<'TXT'
 
 
-        Enriquecimiento con investigación:
-        - El artículo debe quedar más completo gracias al bloque "INVESTIGACIÓN WEB COMPLEMENTARIA".
-        - Añade contexto relevante que no esté en la noticia original cuando la investigación lo aporte con claridad.
-        - El lector debe notar un artículo más informado, no una simple parafrasis de la fuente.
-        TXT;
+            Enriquecimiento con investigación:
+            - El artículo debe quedar más completo gracias al bloque "INVESTIGACIÓN WEB COMPLEMENTARIA".
+            - Añade contexto relevante que no esté en la noticia original cuando la investigación lo aporte con claridad.
+            - El lector debe notar un artículo más informado, no una simple parafrasis de la fuente.
+            TXT;
+            }
+
+            $blocks[] = $writingInstructions;
         }
 
-        $blocks[] = $writingInstructions;
         $blocks[] = <<<'TXT'
 
         Tono y estilo:
         - Arranque directo. Nunca empieces con "En el mundo del anime..." o "Es importante destacar que...".
         - Cercano, como contárselo a un fan, no a un lector genérico.
-        - Cubre los puntos importantes sin relleno. Si el contenido es extenso, usa subtítulos y párrafos; si es corto, un artículo breve bien escrito es suficiente.
+        - Cubre los puntos importantes sin relleno. Usa subtítulos y párrafos cuando haya varios temas.
 
         HTML para WordPress:
         - Usa <p>, <h2>, <h3>, <strong>, <ul><li> donde corresponda.

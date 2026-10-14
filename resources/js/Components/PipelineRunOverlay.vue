@@ -160,6 +160,58 @@ async function clearFinished() {
     }
 }
 
+function formatDuration(seconds) {
+    const total = Math.max(0, Math.round(Number(seconds) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+
+    if (hours > 0) {
+        return `${hours} h ${minutes} min ${secs} seg`;
+    }
+
+    if (minutes > 0) {
+        return `${minutes} min ${secs} seg`;
+    }
+
+    return `${secs} seg`;
+}
+
+function runDurationSeconds(run) {
+    if (run.duration_seconds != null && run.duration_seconds >= 0) {
+        return run.duration_seconds;
+    }
+
+    const timings = run.summary?.timings;
+
+    if (timings && typeof timings === 'object') {
+        const total = Object.values(timings).reduce(
+            (sum, value) => sum + (Number(value) || 0),
+            0,
+        );
+
+        if (total > 0) {
+            return Math.round(total);
+        }
+    }
+
+    if (run.started_at && run.finished_at) {
+        const ms = new Date(run.finished_at).getTime() - new Date(run.started_at).getTime();
+
+        if (ms > 0) {
+            return Math.round(ms / 1000);
+        }
+    }
+
+    return null;
+}
+
+function runDurationLabel(run) {
+    const seconds = runDurationSeconds(run);
+
+    return seconds != null ? formatDuration(seconds) : null;
+}
+
 function runStatusLabel(status) {
     const map = {
         queued: 'En cola',
@@ -278,6 +330,14 @@ function showFullRunDetail(run) {
                                 </p>
                                 <p class="mt-0.5 text-xs opacity-90">
                                     {{ runStatusLabel(run.status) }}
+                                    <span
+                                        v-if="
+                                            (run.status === 'completed' || run.status === 'failed')
+                                            && runDurationLabel(run)
+                                        "
+                                    >
+                                        · {{ runDurationLabel(run) }}
+                                    </span>
                                     <span v-if="run.status === 'queued' && run.queue_position">
                                         · posición {{ run.queue_position }}
                                     </span>

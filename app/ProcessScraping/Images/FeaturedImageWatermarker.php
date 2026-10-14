@@ -155,6 +155,14 @@ class FeaturedImageWatermarker
         }
     }
 
+    /**
+     * Convierte a webp (u otro formato configurado) sin marca de agua — imágenes scrapeadas de terceros.
+     */
+    public function normalizeDownloaded(string $relativePath): ?string
+    {
+        return $this->normalizeOnly($relativePath);
+    }
+
     private function normalizeOnly(string $relativePath): ?string
     {
         $disk = Storage::disk('public');

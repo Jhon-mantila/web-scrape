@@ -60,6 +60,31 @@ return [
     'scraper' => [
         'article_ai_default_model' => env('SCRAPER_ARTICLE_AI_MODEL', env('OLLAMA_MODEL', 'qwen3:14b')),
         'article_ollama_target' => env('SCRAPER_ARTICLE_OLLAMA_TARGET', 'local'),
+        'anime_news_staged' => filter_var(env('SCRAPER_ANIME_NEWS_STAGED', true), FILTER_VALIDATE_BOOLEAN),
+        'anime_news_entity_temperature' => (float) env('SCRAPER_ANIME_NEWS_ENTITY_TEMPERATURE', 0.15),
+        'anime_news_fact_sheet_temperature' => (float) env('SCRAPER_ANIME_NEWS_FACT_SHEET_TEMPERATURE', 0.15),
+        'anime_news_write_temperature' => (float) env('SCRAPER_ANIME_NEWS_WRITE_TEMPERATURE', 0.65),
+        'anime_news_min_words' => (int) env('SCRAPER_ANIME_NEWS_MIN_WORDS', 350),
+        'anime_news_editorial_gate_enabled' => filter_var(env('SCRAPER_ANIME_NEWS_EDITORIAL_GATE', true), FILTER_VALIDATE_BOOLEAN),
+        'anime_news_filter_enabled' => filter_var(env('SCRAPER_ANIME_NEWS_FILTER', true), FILTER_VALIDATE_BOOLEAN),
+        'anime_news_min_anilist_popularity' => (int) env('SCRAPER_ANIME_NEWS_MIN_POPULARITY', 8000),
+        'anime_news_group_hours' => (int) env('SCRAPER_ANIME_NEWS_GROUP_HOURS', 72),
+        'anime_news_internal_links' => (int) env('SCRAPER_ANIME_NEWS_INTERNAL_LINKS', 3),
+        'anime_news_max_tries_per_limit' => (int) env('SCRAPER_ANIME_NEWS_MAX_TRIES', 20),
+    ],
+
+    'anilist' => [
+        'enabled' => filter_var(env('ANILIST_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+        'url' => env('ANILIST_GRAPHQL_URL', 'https://graphql.anilist.co'),
+        'timeout' => (int) env('ANILIST_TIMEOUT', 20),
+    ],
+
+    'research' => [
+        'page_fetch_max' => (int) env('RESEARCH_PAGE_FETCH_MAX', 2),
+        'page_max_chars' => (int) env('RESEARCH_PAGE_MAX_CHARS', 6000),
+        'page_context_chars' => (int) env('RESEARCH_PAGE_CONTEXT_CHARS', 4500),
+        'page_fetch_timeout' => (int) env('RESEARCH_PAGE_FETCH_TIMEOUT', 18),
+        'page_fetch_max_bytes' => (int) env('RESEARCH_PAGE_FETCH_MAX_BYTES', 800000),
     ],
 
     'videos' => [
@@ -88,7 +113,8 @@ return [
         'user_2' => env('WORDPRESS_USER_2'),
         'password_2' => env('WORDPRESS_PASSWORD_2'),
         'schedule_timezone' => env('WORDPRESS_SCHEDULE_TIMEZONE', env('APP_TIMEZONE', 'America/Bogota')),
-        'schedule_max_per_day' => (int) env('WORDPRESS_SCHEDULE_MAX_PER_DAY', 5),
+        'schedule_max_per_day' => (int) env('WORDPRESS_SCHEDULE_MAX_PER_DAY', 3),
+        'max_posts_per_day' => env('WORDPRESS_MAX_POSTS_PER_DAY'),
         'schedule_start_hour' => (int) env('WORDPRESS_SCHEDULE_START_HOUR', 9),
         'schedule_start_minute' => (int) env('WORDPRESS_SCHEDULE_START_MINUTE', 0),
         'schedule_interval_hours' => (int) env('WORDPRESS_SCHEDULE_INTERVAL_HOURS', 3),

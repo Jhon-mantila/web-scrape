@@ -551,6 +551,38 @@ Orden interno del pipeline:
 5. Generación IA (Ollama)
 6. Envío WordPress
 
+#### Estados `news.status_ia` y cola del pipeline
+
+Campo en la tabla **`news`**: `status_ia` (string, nullable, indexado). Indica en qué punto quedó el procesamiento con IA y si el pipeline automático la volverá a tomar.
+
+| `status_ia` | Significado | ¿Entra sola otra vez en el pipeline? |
+|-------------|-------------|----------------------------------------|
+| `null` | Detalle listo; aún no hay IA (o reset suave). | **Sí** — candidata normal. |
+| `processed` | Artículo IA generado y guardado en `news_ai_articles`. | No (salvo `--force` en `news:pipeline` / `news:generate-ai`). |
+| `failed` | Error de proveedor IA, JSON inválido, etc. | **Sí** — se reintenta en la siguiente corrida **sin** `--force`. |
+| `skipped_short` | Artículo por debajo de `SCRAPER_ANIME_NEWS_MIN_WORDS` (p. ej. 350). Se borra la imagen local (`featured_image_path` / `featured_image_source` en `news_details`). | **No** — excluida hasta reset manual o SQL. |
+| `skipped_quality` | Ficha `INSUFICIENTE`, frases prohibidas u otra regla de calidad (no “corto”). | **No** — igual que arriba. |
+| `skipped_low_interest` | Filtro editorial: popularidad AniList por debajo de `SCRAPER_ANIME_NEWS_MIN_POPULARITY`. | **No** — igual que arriba. |
+| `merged` | Noticia absorbida en otra de la misma franquicia (agrupación 72 h). | **No** — ver `merged_into_news_id`. |
+
+**Campo relacionado en `news` (no es `status_ia`):**
+
+| Campo | Significado |
+|-------|-------------|
+| `merged_into_news_id` | ID de la noticia **primaria** que concentró el contenido. Si no es `NULL`, esta fila **no entra** en investigación/IA aunque `status_ia` fuera `null`. Limpiar con `UPDATE news SET merged_into_news_id = NULL` si quieres reprocesar. |
+
+**Reprocesar estados bloqueados:**
+
+- Reset suave: `php artisan news:reset-processing --force` → pone `status_ia` en `null` (no limpia `merged_into_news_id`; haz el `UPDATE` anterior si aplica).
+- Forzar regeneración IA sobre ya procesadas: `news:pipeline --force` o `news:generate-ai --force`.
+
+**Consulta rápida (MySQL):**
+
+```sql
+SELECT status_ia, COUNT(*) FROM news GROUP BY status_ia;
+SELECT id, title, status_ia, merged_into_news_id FROM news WHERE status_ia IN ('skipped_short','skipped_quality','skipped_low_interest','merged');
+```
+
 ---
 
 Comando **fuera del pipeline** para borrar imágenes, investigación o IA sin tener que reprocesar todo manualmente.

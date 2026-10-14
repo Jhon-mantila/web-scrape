@@ -16,7 +16,7 @@ class AnimeNewsDetailScraper extends BaseScraper implements DetailScraperInterfa
 
         $rawHtml = null;
         // ANN: el contenido vive en #content-zone .KonaBody y el cuerpo en .meat
-        foreach (['#content-zone .KonaBody', '#content-zone .KonaBody .meat', '#maincontent #content-zone', '#maincontent', 'body'] as $selector) {
+        foreach (['#content-zone .KonaBody .meat', '#content-zone .KonaBody', '#maincontent #content-zone', '#maincontent', 'body'] as $selector) {
             if ($crawler->filter($selector)->count() > 0) {
                 $rawHtml = $crawler->filter($selector)->first()->html();
                 break;
@@ -38,9 +38,12 @@ class AnimeNewsDetailScraper extends BaseScraper implements DetailScraperInterfa
             return '';
         }
 
-        $text = strip_tags($html);
+        $normalized = preg_replace('/<\/?(p|div|h[1-6]|li|blockquote)[^>]*>/i', "\n\n", $html) ?? $html;
+        $normalized = preg_replace('/<br\s*\/?>/i', "\n", $normalized) ?? $normalized;
+        $text = strip_tags($normalized);
         $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $text = preg_replace('/\s+/', ' ', $text);
+        $text = preg_replace("/[ \t]+/", ' ', $text) ?? $text;
+        $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
 
         return trim((string) $text);
     }

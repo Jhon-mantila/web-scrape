@@ -40,6 +40,16 @@ class PipelineSummaryFormatter
             }
         }
 
+        $timings = $summary['timings'] ?? [];
+
+        if (is_array($timings) && $timings !== []) {
+            $total = array_sum(array_map('floatval', $timings));
+
+            if ($total > 0) {
+                $parts[] = 'Tiempo '.$this->formatDuration($total);
+            }
+        }
+
         return 'Pipeline: '.implode(' · ', $parts);
     }
 
@@ -48,7 +58,18 @@ class PipelineSummaryFormatter
      */
     public function formatWordpress(array $wordpress, string $mode): string
     {
-        return 'WordPress ('.$mode.'): '.$this->wordpressLine($wordpress, $mode);
+        $line = 'WordPress ('.$mode.'): '.$this->wordpressLine($wordpress, $mode);
+        $timings = $wordpress['timings'] ?? null;
+
+        if (is_array($timings) && $timings !== []) {
+            $total = array_sum(array_map('floatval', $timings));
+
+            if ($total > 0) {
+                $line .= ' · Tiempo '.$this->formatDuration($total);
+            }
+        }
+
+        return $line;
     }
 
     /**
@@ -73,5 +94,24 @@ class PipelineSummaryFormatter
         }
 
         return $line;
+    }
+
+    private function formatDuration(float $seconds): string
+    {
+        $seconds = max(0, (int) round($seconds));
+
+        $hours = intdiv($seconds, 3600);
+        $minutes = intdiv($seconds % 3600, 60);
+        $secs = $seconds % 60;
+
+        if ($hours > 0) {
+            return sprintf('%d h %d min %d seg', $hours, $minutes, $secs);
+        }
+
+        if ($minutes > 0) {
+            return sprintf('%d min %d seg', $minutes, $secs);
+        }
+
+        return sprintf('%d seg', $secs);
     }
 }

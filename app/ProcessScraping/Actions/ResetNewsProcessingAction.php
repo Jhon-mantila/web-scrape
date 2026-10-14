@@ -41,6 +41,8 @@ class ResetNewsProcessingAction
             if ($research) {
                 $updates['research_context'] = null;
                 $updates['research_raw'] = null;
+                $updates['fact_sheet'] = null;
+                $updates['grouped_sources'] = null;
                 $updates['researched_at'] = null;
             }
 
