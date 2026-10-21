@@ -18,6 +18,30 @@ const props = defineProps({
         type: Object,
         default: () => ({}),
     },
+    uploadLimits: {
+        type: Object,
+        default: () => ({}),
+    },
+});
+
+const videoHint = computed(() => {
+    const limits = props.uploadLimits;
+
+    if (!limits?.video_formats) {
+        return 'Formatos: MP4, WebM o MOV.';
+    }
+
+    return `Formatos: ${limits.video_formats}. Tamaño máximo: ${limits.max_video_label}.`;
+});
+
+const thumbnailHint = computed(() => {
+    const limits = props.uploadLimits;
+
+    if (!limits?.thumbnail_formats) {
+        return 'JPG, PNG o WebP. Solo se envía a YouTube y Facebook si cargas una.';
+    }
+
+    return `Formatos: ${limits.thumbnail_formats}. Tamaño máximo: ${limits.max_thumbnail_label}. Solo YouTube y Facebook si cargas una.`;
 });
 
 const platformByKey = computed(() =>
@@ -56,13 +80,35 @@ const form = useForm({
 });
 
 function onVideoPicked(file) {
-    videoFile.value = file;
     form.clearErrors('video');
+
+    if (file && props.uploadLimits?.max_video_bytes && file.size > props.uploadLimits.max_video_bytes) {
+        form.setError(
+            'video',
+            `El video supera el tamaño máximo (${props.uploadLimits.max_video_label}).`,
+        );
+        videoFile.value = null;
+
+        return;
+    }
+
+    videoFile.value = file;
 }
 
 function onThumbnailPicked(file) {
-    thumbnailFile.value = file;
     form.clearErrors('thumbnail');
+
+    if (file && props.uploadLimits?.max_thumbnail_bytes && file.size > props.uploadLimits.max_thumbnail_bytes) {
+        form.setError(
+            'thumbnail',
+            `La miniatura supera el tamaño máximo (${props.uploadLimits.max_thumbnail_label}).`,
+        );
+        thumbnailFile.value = null;
+
+        return;
+    }
+
+    thumbnailFile.value = file;
 }
 
 function submit() {
@@ -101,7 +147,11 @@ function togglePlatform(key) {
     <AppLayout>
         <div class="mb-8">
             <h2 class="text-2xl font-semibold">Subir video</h2>
-            <p class="mt-1 text-slate-400">
+            <p v-if="uploadLimits.max_video_label" class="mt-1 text-slate-400">
+                Video hasta {{ uploadLimits.max_video_label }} ({{ uploadLimits.video_formats }}).
+                Miniatura opcional hasta {{ uploadLimits.max_thumbnail_label }} ({{ uploadLimits.thumbnail_formats }}).
+            </p>
+            <p v-else class="mt-1 text-slate-400">
                 MP4, MOV o WebM. La miniatura es opcional (YouTube y Facebook la usan solo si la cargas).
             </p>
         </div>
@@ -177,7 +227,7 @@ function togglePlatform(key) {
                     accept="video/mp4,video/webm,video/quicktime,.mp4,.mov,.webm,video/*"
                     choose-label="Elegir video"
                     empty-label="Ningún video seleccionado"
-                    hint="Formatos: MP4, WebM o MOV."
+                    :hint="videoHint"
                     @update:model-value="onVideoPicked"
                 />
                 <p v-if="form.errors.video" class="mt-1 text-sm text-red-400">{{ form.errors.video }}</p>
@@ -191,7 +241,7 @@ function togglePlatform(key) {
                     accept="image/jpeg,image/png,image/webp"
                     choose-label="Elegir imagen"
                     empty-label="Sin miniatura — YouTube/Facebook usarán la suya"
-                    hint="JPG, PNG o WebP. Solo se envía a YouTube y Facebook si cargas una."
+                    :hint="thumbnailHint"
                 />
                 <p v-if="form.errors.thumbnail" class="mt-1 text-sm text-red-400">{{ form.errors.thumbnail }}</p>
             </div>

@@ -21,6 +21,8 @@ use App\ProcessScraping\Support\ArticleWordCounter;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
 use App\Scraper\Actions\DeleteFullyPublishedScraperNewsAction;
+use App\Scraper\Actions\DeleteNewsByStatusIaScraperAction;
+use App\Scraper\Actions\DeleteNonProcessedScraperNewsAction;
 use App\Scraper\Support\NewsScraperStats;
 use App\SendWordpress\Actions\AttachWordpressFeaturedImagesAction;
 use App\SendWordpress\Actions\SyncWordpressScraperStatusAction;
@@ -349,6 +351,92 @@ class ScraperController extends Controller
         $message = sprintf(
             'Eliminadas %d noticia(s) del scraper (imágenes locales: %d). Los posts en WordPress no se borraron.',
             $summary['news_deleted'],
+            $summary['images_deleted'],
+        );
+
+        return back()->with('success', $message);
+    }
+
+    public function purgeNonProcessedCount(DeleteNonProcessedScraperNewsAction $action): JsonResponse
+    {
+        return response()->json([
+            'count' => $action->countEligible(),
+            'kept' => $action->countKept(),
+        ]);
+    }
+
+    public function purgeNonProcessed(DeleteNonProcessedScraperNewsAction $action): RedirectResponse
+    {
+        $count = $action->countEligible();
+
+        if ($count === 0) {
+            return back()->with('error', 'No hay noticias fuera de estado «procesado» para borrar.');
+        }
+
+        $summary = $action->execute();
+
+        $message = sprintf(
+            'Eliminadas %d noticia(s) incompletas o fallidas. Quedan %d con detalle e IA en «processed». Imágenes locales borradas: %d.',
+            $summary['news_deleted'],
+            $summary['kept'],
+            $summary['images_deleted'],
+        );
+
+        return back()->with('success', $message);
+    }
+
+    public function purgeByStatusBreakdown(DeleteNewsByStatusIaScraperAction $action): JsonResponse
+    {
+        return response()->json([
+            'breakdown' => $action->breakdown(),
+        ]);
+    }
+
+    public function purgeByStatusCount(Request $request, DeleteNewsByStatusIaScraperAction $action): JsonResponse
+    {
+        $validated = $request->validate([
+            'status_ia_keys' => 'required|array|min:1',
+            'status_ia_keys.*' => 'string|max:64',
+        ]);
+
+        $keys = $action->normalizeSelectedKeys($validated['status_ia_keys']);
+
+        return response()->json([
+            'count' => $action->countForKeys($keys),
+            'keys' => $keys,
+        ]);
+    }
+
+    public function purgeByStatus(Request $request, DeleteNewsByStatusIaScraperAction $action): RedirectResponse
+    {
+        $validated = $request->validate([
+            'status_ia_keys' => 'required|array|min:1',
+            'status_ia_keys.*' => 'string|max:64',
+        ]);
+
+        $keys = $action->normalizeSelectedKeys($validated['status_ia_keys']);
+
+        if ($keys === []) {
+            return back()->with('error', 'Ningún estado status_ia válido seleccionado.');
+        }
+
+        $count = $action->countForKeys($keys);
+
+        if ($count === 0) {
+            return back()->with('error', 'No hay noticias con los estados seleccionados.');
+        }
+
+        $summary = $action->execute($keys);
+
+        $labels = implode(', ', array_map(
+            fn (string $key) => $key === DeleteNewsByStatusIaScraperAction::NULL_KEY ? '(vacío/null)' : $key,
+            $summary['keys'],
+        ));
+
+        $message = sprintf(
+            'Eliminadas %d noticia(s) con status_ia: %s. Imágenes locales borradas: %d. WordPress no se modificó.',
+            $summary['news_deleted'],
+            $labels,
             $summary['images_deleted'],
         );
 

@@ -21,7 +21,7 @@ class SocialPublishingServiceProvider extends ServiceProvider
             $linkedInTokensJessika = new LinkedInTokenService('linkedin_jessika');
 
             $publishers = [
-                new YouTubePublisher,
+                $this->app->make(YouTubePublisher::class),
                 new FacebookPublisher('facebook_esquinaweb', 'esquinaweb'),
                 new FacebookPublisher('facebook_esquinagamers', 'esquinagamers'),
                 new LinkedInPublisher('linkedin', $linkedInTokensDefault),

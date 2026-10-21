@@ -81,7 +81,8 @@ return [
     ],
 
     'upload' => [
-        'max_video_mb' => (int) env('SOCIAL_MAX_VIDEO_MB', 500),
+        'max_video_mb' => (int) env('SOCIAL_MAX_VIDEO_MB', 1024),
+        'max_thumbnail_mb' => (int) env('SOCIAL_MAX_THUMBNAIL_MB', 10),
         'video_mimes' => ['mp4', 'mov', 'webm'],
         /** MIME detectados por PHP (finfo); algunos .mov vienen como video/mp4 u octet-stream. */
         'video_mimetypes' => [

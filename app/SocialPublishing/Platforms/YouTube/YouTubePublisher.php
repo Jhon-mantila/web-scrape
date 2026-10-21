@@ -12,6 +12,14 @@ use Illuminate\Support\Facades\Storage;
 
 class YouTubePublisher implements SocialPublisherInterface
 {
+    /** Por encima de esto se usa subida resumable por fragmentos (como Facebook). */
+    private const RESUMABLE_MIN_BYTES = 20 * 1024 * 1024;
+
+    public function __construct(
+        private readonly YouTubeAccessToken $accessToken,
+        private readonly YouTubeResumableVideoUpload $resumableUpload,
+    ) {}
+
     public function platform(): string
     {
         return 'youtube';
@@ -43,7 +51,7 @@ class YouTubePublisher implements SocialPublisherInterface
         $caption = $publication->caption() ?? $video->title;
 
         try {
-            $accessToken = $this->accessToken();
+            $accessToken = $this->accessToken->get();
 
             $metadata = [
                 'snippet' => [
@@ -54,21 +62,32 @@ class YouTubePublisher implements SocialPublisherInterface
                 'status' => $this->buildVideoStatus($publication),
             ];
 
-            $response = Http::withToken($accessToken)
-                ->attach('metadata', json_encode($metadata), 'metadata', ['Content-Type' => 'application/json; charset=UTF-8'])
-                ->attach('media', fopen($videoPath, 'r'), basename($videoPath), ['Content-Type' => 'video/*'])
-                ->post('https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status&uploadType=multipart');
+            $fileSize = filesize($videoPath);
 
-            if ($response->failed()) {
-                Log::warning('youtube: upload failed', ['body' => $response->body()]);
-
-                return PublishResult::fail(
-                    'YouTube API: '.$response->status().' — '.$response->body(),
-                    $response->json(),
-                );
+            if ($fileSize === false || $fileSize <= 0) {
+                return PublishResult::fail('No se pudo leer el tamaño del archivo de video.');
             }
 
-            $data = $response->json();
+            if ($fileSize >= self::RESUMABLE_MIN_BYTES) {
+                $data = $this->resumableUpload->upload($accessToken, $metadata, $videoPath);
+            } else {
+                $response = Http::withToken($accessToken)
+                    ->timeout(600)
+                    ->attach('metadata', json_encode($metadata), 'metadata', ['Content-Type' => 'application/json; charset=UTF-8'])
+                    ->attach('media', fopen($videoPath, 'r'), basename($videoPath), ['Content-Type' => 'video/*'])
+                    ->post('https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status&uploadType=multipart');
+
+                if ($response->failed()) {
+                    Log::warning('youtube: upload failed', ['body' => $response->body()]);
+
+                    return PublishResult::fail(
+                        'YouTube API: '.$response->status().' — '.$response->body(),
+                        $response->json(),
+                    );
+                }
+
+                $data = $response->json();
+            }
             $videoId = $data['id'] ?? null;
 
             if ($videoId === null) {
@@ -97,28 +116,6 @@ class YouTubePublisher implements SocialPublisherInterface
         } catch (\Throwable $e) {
             return PublishResult::fail($e->getMessage());
         }
-    }
-
-    private function accessToken(): string
-    {
-        $refreshToken = SocialPlatformAccount::youtubeRefreshToken();
-
-        if ($refreshToken === null) {
-            throw new \RuntimeException('YouTube no conectado. Ve a Configuración y conecta tu canal.');
-        }
-
-        $response = Http::asForm()->post('https://oauth2.googleapis.com/token', [
-            'client_id' => config('social.youtube.client_id'),
-            'client_secret' => config('social.youtube.client_secret'),
-            'refresh_token' => $refreshToken,
-            'grant_type' => 'refresh_token',
-        ]);
-
-        if ($response->failed()) {
-            throw new \RuntimeException('No se pudo refrescar token de YouTube: '.$response->body());
-        }
-
-        return (string) $response->json('access_token');
     }
 
     /**

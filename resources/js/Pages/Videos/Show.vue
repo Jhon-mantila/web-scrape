@@ -16,6 +16,10 @@ const props = defineProps({
         type: Object,
         default: () => ({}),
     },
+    uploadLimits: {
+        type: Object,
+        default: () => ({}),
+    },
 });
 
 const thumbnailPreview = ref(null);
@@ -134,6 +138,19 @@ const hasLinkedIn = computed(() =>
     props.video.publications.some((p) => isLinkedIn(p.platform)),
 );
 
+const thumbnailHint = computed(() => {
+    const limits = props.uploadLimits;
+    const linkedInNote = hasLinkedIn.value
+        ? ' LinkedIn no la utiliza.'
+        : '';
+
+    if (!limits?.thumbnail_formats) {
+        return `Opcional. Solo se envía a YouTube y Facebook si cargas una.${linkedInNote}`;
+    }
+
+    return `Formatos: ${limits.thumbnail_formats}. Tamaño máximo: ${limits.max_thumbnail_label}. Opcional; YouTube y Facebook.${linkedInNote}`;
+});
+
 function isLinkedIn(platform) {
     return platform === 'linkedin' || platform === 'linkedin_jessika';
 }
@@ -162,8 +179,10 @@ function linkedInObservations(pub) {
         items.push(`Duración recomendada: hasta ~${hints.max_duration_minutes} minutos.`);
     }
 
-    if (props.video.max_video_mb) {
-        items.push(`Límite de subida en Esquina AI: ${props.video.max_video_mb} MB.`);
+    const uploadLabel = props.uploadLimits?.max_video_label ?? props.video.max_video_label;
+
+    if (uploadLabel) {
+        items.push(`Límite de subida en Esquina AI: ${uploadLabel}.`);
     }
 
     return items;
@@ -223,6 +242,24 @@ function postSocialPublish(url, body) {
 }
 
 function onThumbnailSelected(file) {
+    form.clearErrors('thumbnail');
+
+    if (file && props.uploadLimits?.max_thumbnail_bytes && file.size > props.uploadLimits.max_thumbnail_bytes) {
+        form.setError(
+            'thumbnail',
+            `La miniatura supera el tamaño máximo (${props.uploadLimits.max_thumbnail_label}).`,
+        );
+
+        if (thumbnailPreview.value) {
+            URL.revokeObjectURL(thumbnailPreview.value);
+        }
+
+        thumbnailPreview.value = null;
+        form.thumbnail = null;
+
+        return;
+    }
+
     if (thumbnailPreview.value) {
         URL.revokeObjectURL(thumbnailPreview.value);
     }
@@ -329,6 +366,20 @@ function facebookVideoId(pub) {
     return response.facebook_video_id || response.id || null;
 }
 
+function youtubeVideoId(pub) {
+    if (pub.external_id) {
+        return pub.external_id;
+    }
+
+    const response = pub.api_response;
+
+    if (!response) {
+        return null;
+    }
+
+    return response.id || null;
+}
+
 function deleteFromFacebook(pub) {
     const videoId = facebookVideoId(pub);
 
@@ -345,6 +396,24 @@ function deleteFromFacebook(pub) {
 
 function canDeleteFromFacebook(pub) {
     return isFacebook(pub.platform) && facebookVideoId(pub);
+}
+
+function deleteFromYouTube(pub) {
+    const videoId = youtubeVideoId(pub);
+
+    if (!videoId) {
+        return;
+    }
+
+    if (!confirm(`¿Eliminar este video de YouTube? Se borrará del canal y podrás enviarlo de nuevo desde aquí.`)) {
+        return;
+    }
+
+    router.delete(route('videos.publications.youtube.destroy', [props.video.id, pub.id]));
+}
+
+function canDeleteFromYouTube(pub) {
+    return pub.platform === 'youtube' && youtubeVideoId(pub);
 }
 
 function removePlatform(pub) {
@@ -476,7 +545,7 @@ function openSchedulePicker(event) {
                             accept="image/jpeg,image/png,image/webp"
                             choose-label="Elegir imagen"
                             empty-label="Sin miniatura — no se enviará a YouTube ni Facebook"
-                            :hint="hasLinkedIn ? 'Opcional. Si cargas una, aplica a YouTube y Facebook; LinkedIn no la utiliza.' : 'Opcional. Solo se envía a YouTube y Facebook si cargas una.'"
+                            :hint="thumbnailHint"
                             @change="onThumbnailSelected"
                         />
                         <p v-if="form.errors.thumbnail" class="mt-1 text-sm text-red-400">{{ form.errors.thumbnail }}</p>
@@ -627,6 +696,14 @@ function openSchedulePicker(event) {
                                 @click="publish(pub.id)"
                             >
                                 Enviar
+                            </button>
+                            <button
+                                v-if="canDeleteFromYouTube(pub)"
+                                type="button"
+                                class="rounded-lg border border-red-900/60 px-3 py-1.5 text-sm text-red-400 hover:bg-red-950/40"
+                                @click="deleteFromYouTube(pub)"
+                            >
+                                Eliminar de YouTube
                             </button>
                             <button
                                 v-if="canDeleteFromFacebook(pub)"

@@ -6,6 +6,8 @@ use App\Models\News;
 use App\Models\NewsAiArticle;
 use App\Models\NewsDetail;
 use App\Scraper\Actions\DeleteFullyPublishedScraperNewsAction;
+use App\Scraper\Actions\DeleteNewsByStatusIaScraperAction;
+use App\Scraper\Actions\DeleteNonProcessedScraperNewsAction;
 use Illuminate\Support\Carbon;
 
 class NewsScraperStats
@@ -26,7 +28,10 @@ class NewsScraperStats
      *     next_scheduled_at: ?string,
      *     last_scheduled_at: ?string,
      *     schedule_buffer_days: ?int,
-     *     wp_publish_purge_ready: int
+     *     wp_publish_purge_ready: int,
+     *     non_processed_purge_ready: int,
+     *     processed_news_kept: int,
+     *     status_ia_breakdown: list<array{key: string, label: string, count: int}>
      * }
      */
     public static function compute(): array
@@ -76,6 +81,9 @@ class NewsScraperStats
                 : null,
             'schedule_buffer_days' => $scheduleBufferDays,
             'wp_publish_purge_ready' => app(DeleteFullyPublishedScraperNewsAction::class)->countEligible(),
+            'non_processed_purge_ready' => app(DeleteNonProcessedScraperNewsAction::class)->countEligible(),
+            'processed_news_kept' => app(DeleteNonProcessedScraperNewsAction::class)->countKept(),
+            'status_ia_breakdown' => app(DeleteNewsByStatusIaScraperAction::class)->breakdown(),
         ];
     }
 }

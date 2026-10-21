@@ -50,7 +50,8 @@ npm run build
 Variables `.env` (publicación social):
 
 ```env
-SOCIAL_MAX_VIDEO_MB=500
+SOCIAL_MAX_VIDEO_MB=1024
+SOCIAL_MAX_THUMBNAIL_MB=10
 
 # YouTube OAuth (subir videos — API key sola no alcanza)
 YOUTUBE_CLIENT_ID=

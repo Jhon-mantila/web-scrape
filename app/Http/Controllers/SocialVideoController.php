@@ -18,9 +18,11 @@ use App\ProcessScraping\Ai\Support\OllamaConnectivity;
 use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
 use App\SocialPublishing\Platforms\Facebook\FacebookPageFeedScheduler;
 use App\SocialPublishing\Platforms\Facebook\FacebookVideoDeleter;
+use App\SocialPublishing\Platforms\YouTube\YouTubeVideoDeleter;
 use App\SocialPublishing\Platforms\Facebook\FacebookVideoMetadata;
 use App\SocialPublishing\Platforms\Facebook\FacebookVideoPermalink;
 use App\SocialPublishing\Support\VideoFileSize;
+use App\SocialPublishing\Support\VideoUploadLimits;
 use App\Http\Support\RequestsBackgroundJson;
 use App\ProcessScraping\Support\PipelineRunState;
 use App\ProcessScraping\Actions\ProcessBackgroundRunQueueAction;
@@ -59,24 +61,23 @@ class SocialVideoController extends Controller
             'platformOptions' => $this->platformOptions(),
             'captionAiOptions' => $captionAi->optionsForUi(),
             'captionAiDefaults' => $this->captionAiDefaults(),
+            'uploadLimits' => VideoUploadLimits::forUi(),
         ]);
     }
 
     public function store(Request $request): RedirectResponse
     {
-        $maxMb = config('social.upload.max_video_mb', 500);
-
         $validated = $request->validate([
             'title' => 'required|string|max:255',
             'notes' => 'nullable|string|max:2000',
             'platforms' => 'required|array|min:1',
             'platforms.*' => 'string|in:'.implode(',', Platform::values()),
-            'video' => $this->videoUploadRules($maxMb),
-            'thumbnail' => 'nullable|file|mimes:'.implode(',', config('social.upload.thumbnail_mimes')).'|max:10240',
+            'video' => $this->videoUploadRules(),
+            'thumbnail' => $this->thumbnailUploadRules(),
             'caption_ai_provider' => $this->captionAiProviderValidation(),
             'caption_ollama_target' => $this->captionOllamaTargetValidation(),
             'caption_ai_model' => $this->captionAiModelValidation(),
-        ]);
+        ], $this->uploadValidationMessages());
 
         DB::transaction(function () use ($request, $validated): void {
             $uploadedVideo = $request->file('video');
@@ -141,6 +142,7 @@ class SocialVideoController extends Controller
             'platformOptions' => $this->platformOptions(),
             'captionAiOptions' => app(VideoCaptionAiClientFactory::class)->optionsForUi(),
             'captionAiDefaults' => $this->captionAiDefaults(),
+            'uploadLimits' => VideoUploadLimits::forUi(),
         ]);
     }
 
@@ -151,7 +153,7 @@ class SocialVideoController extends Controller
         $validated = $request->validate([
             'title' => 'sometimes|string|max:255',
             'notes' => 'nullable|string|max:2000',
-            'thumbnail' => 'nullable|file|mimes:'.implode(',', config('social.upload.thumbnail_mimes')).'|max:10240',
+            'thumbnail' => $this->thumbnailUploadRules(),
             'publications' => 'sometimes|array',
             'publications.*.id' => 'required|integer|exists:social_publications,id',
             'publications.*.caption_edited' => 'nullable|string|max:10000',
@@ -160,7 +162,7 @@ class SocialVideoController extends Controller
             'caption_ai_provider' => $this->captionAiProviderValidation(),
             'caption_ollama_target' => $this->captionOllamaTargetValidation(),
             'caption_ai_model' => $this->captionAiModelValidation(),
-        ]);
+        ], $this->uploadValidationMessages());
 
         $updates = [];
 
@@ -356,7 +358,16 @@ class SocialVideoController extends Controller
 
         try {
             Bus::dispatchAfterResponse(function () use ($user): void {
-                app(ProcessBackgroundRunQueueAction::class)->execute($user->id);
+                try {
+                    app(ProcessBackgroundRunQueueAction::class)->execute($user->id);
+                } catch (Throwable $workerError) {
+                    Log::error('Worker de publicación social falló al iniciar', [
+                        'user_id' => $user->id,
+                        'error' => $workerError->getMessage(),
+                    ]);
+
+                    PipelineRunState::fail($user->id, 'Error al publicar: '.$workerError->getMessage());
+                }
             });
         } catch (Throwable $dispatchError) {
             PipelineRunState::fail($user->id, $dispatchError->getMessage(), $run['id'] ?? null);
@@ -432,6 +443,50 @@ class SocialVideoController extends Controller
         ]);
 
         return back()->with('success', 'Enlace con Facebook limpiado. Ya puedes volver a enviar (programado o inmediato).');
+    }
+
+    public function destroyOnYouTube(
+        Request $request,
+        SocialVideo $video,
+        SocialPublication $publication,
+        YouTubeVideoDeleter $deleter,
+    ): RedirectResponse {
+        abort_unless($publication->social_video_id === $video->id, 404);
+        abort_unless($publication->platform === Platform::Youtube->value, 404);
+
+        $this->authorizeVideo($request, $video);
+
+        if ($publication->external_id === null || $publication->external_id === '') {
+            $fromResponse = is_array($publication->api_response)
+                ? ($publication->api_response['id'] ?? null)
+                : null;
+
+            if (is_string($fromResponse) && $fromResponse !== '') {
+                $publication->external_id = $fromResponse;
+            }
+        }
+
+        if ($publication->external_id === null || $publication->external_id === '') {
+            return back()->with('error', 'No hay video registrado en YouTube para eliminar.');
+        }
+
+        try {
+            $deleter->delete($publication->external_id);
+        } catch (\Throwable $e) {
+            return back()->with('error', $e->getMessage());
+        }
+
+        $publication->update([
+            'status' => PublicationStatus::Draft,
+            'external_id' => null,
+            'external_url' => null,
+            'api_response' => null,
+            'last_error' => null,
+            'published_at' => null,
+            'scheduled_at' => null,
+        ]);
+
+        return back()->with('success', 'Video eliminado de YouTube. Ya puedes volver a enviar desde aquí.');
     }
 
     public function destroyPublication(
@@ -558,7 +613,7 @@ class SocialVideoController extends Controller
                 'platform_hints' => config("social.platforms.{$p->platform}.hints"),
                 'removable' => $p->isRemovable(),
             ])->values(),
-            'max_video_mb' => (int) config('social.upload.max_video_mb', 500),
+            'max_video_label' => VideoUploadLimits::mbLabel(VideoUploadLimits::videoMaxMb()),
         ];
     }
 
@@ -571,14 +626,30 @@ class SocialVideoController extends Controller
     /**
      * @return list<string|\Closure>
      */
-    private function videoUploadRules(int $maxMb): array
+    /**
+     * @return array<string, string>
+     */
+    private function uploadValidationMessages(): array
     {
-        $maxKb = $maxMb * 1024;
+        return [
+            'video.max' => 'El video no puede superar '.VideoUploadLimits::mbLabel(VideoUploadLimits::videoMaxMb()).'.',
+            'thumbnail.max' => 'La miniatura no puede superar '.VideoUploadLimits::mbLabel(VideoUploadLimits::thumbnailMaxMb()).'.',
+        ];
+    }
 
+    private function thumbnailUploadRules(): string
+    {
+        return 'nullable|file|mimes:'
+            .implode(',', config('social.upload.thumbnail_mimes'))
+            .'|max:'.VideoUploadLimits::thumbnailMaxKb();
+    }
+
+    private function videoUploadRules(): array
+    {
         return [
             'required',
             'file',
-            'max:'.$maxKb,
+            'max:'.VideoUploadLimits::videoMaxKb(),
             function (string $attribute, mixed $value, \Closure $fail): void {
                 if (! $value instanceof \Illuminate\Http\UploadedFile) {
                     $fail('Selecciona un archivo de video.');

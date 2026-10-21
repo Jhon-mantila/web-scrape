@@ -40,6 +40,9 @@ const props = defineProps({
             wp_drafts: 0,
             wp_legacy: 0,
             wp_publish_purge_ready: 0,
+            non_processed_purge_ready: 0,
+            processed_news_kept: 0,
+            status_ia_breakdown: [],
             next_scheduled_at: null,
             last_scheduled_at: null,
             schedule_buffer_days: null,
@@ -85,6 +88,13 @@ const pipelineForm = useForm({
 
 const syncWpForm = useForm({});
 const purgePublishedForm = useForm({});
+const purgeNonProcessedForm = useForm({});
+const purgeByStatusForm = useForm({
+    status_ia_keys: [],
+});
+const selectedStatusIaKeys = ref([]);
+const purgeModalOpen = ref(false);
+const purgeModalTab = ref('lote');
 const attachFeaturedForm = useForm({
     limit: 50,
     all: false,
@@ -510,6 +520,149 @@ async function purgePublishedLocal() {
 
     purgePublishedForm.post(route('scraper.purge-published'), {
         preserveScroll: true,
+        onSuccess: () => {
+            closePurgeModal();
+            router.reload({ only: ['stats', 'news'], preserveScroll: true });
+        },
+    });
+}
+
+const statusIaBreakdown = computed(() => props.stats?.status_ia_breakdown ?? []);
+
+const selectedStatusIaTotal = computed(() => {
+    const map = Object.fromEntries(
+        statusIaBreakdown.value.map((row) => [row.key, row.count ?? 0]),
+    );
+
+    return selectedStatusIaKeys.value.reduce(
+        (sum, key) => sum + (map[key] ?? 0),
+        0,
+    );
+});
+
+function toggleStatusIaKey(key) {
+    if (selectedStatusIaKeys.value.includes(key)) {
+        selectedStatusIaKeys.value = selectedStatusIaKeys.value.filter((item) => item !== key);
+    } else {
+        selectedStatusIaKeys.value = [...selectedStatusIaKeys.value, key];
+    }
+}
+
+function selectAllStatusIaKeys() {
+    selectedStatusIaKeys.value = statusIaBreakdown.value.map((row) => row.key);
+}
+
+function clearStatusIaKeys() {
+    selectedStatusIaKeys.value = [];
+}
+
+function refreshStatusIaBreakdown() {
+    router.reload({ only: ['stats'], preserveScroll: true });
+}
+
+function openPurgeModal(tab = 'lote') {
+    purgeModalTab.value = tab;
+    purgeModalOpen.value = true;
+}
+
+function closePurgeModal() {
+    purgeModalOpen.value = false;
+}
+
+async function purgeByStatusLocal() {
+    if (purgeByStatusForm.processing || selectedStatusIaKeys.value.length === 0) {
+        return;
+    }
+
+    let count = selectedStatusIaTotal.value;
+
+    try {
+        const { data } = await axios.post(route('scraper.purge-by-status.count'), {
+            status_ia_keys: selectedStatusIaKeys.value,
+        });
+        count = data.count ?? count;
+    } catch {
+        window.alert('No se pudo calcular cuántas noticias se eliminarían.');
+
+        return;
+    }
+
+    if (count === 0) {
+        window.alert('No hay noticias con los estados seleccionados.');
+
+        return;
+    }
+
+    const labels = statusIaBreakdown.value
+        .filter((row) => selectedStatusIaKeys.value.includes(row.key))
+        .map((row) => `${row.label} (${row.count})`)
+        .join(', ');
+
+    const ok = window.confirm(
+        `¿Eliminar ${count} noticia(s)?\n\n`
+            + `Estados status_ia seleccionados:\n${labels}\n\n`
+            + 'Se borran news, news_details, news_ai_articles e imágenes locales.\n'
+            + 'Los posts en WordPress NO se eliminan.',
+    );
+
+    if (!ok) {
+        return;
+    }
+
+    purgeByStatusForm
+        .transform(() => ({ status_ia_keys: [...selectedStatusIaKeys.value] }))
+        .post(route('scraper.purge-by-status'), {
+            preserveScroll: true,
+            onSuccess: () => {
+                selectedStatusIaKeys.value = [];
+                closePurgeModal();
+                router.reload({ only: ['stats', 'news'], preserveScroll: true });
+            },
+        });
+}
+
+async function purgeNonProcessedLocal() {
+    if (purgeNonProcessedForm.processing) {
+        return;
+    }
+
+    let count = props.stats?.non_processed_purge_ready ?? 0;
+    let kept = props.stats?.processed_news_kept ?? 0;
+
+    try {
+        const { data } = await axios.get(route('scraper.purge-non-processed.count'));
+        count = data.count ?? count;
+        kept = data.kept ?? kept;
+    } catch {
+        window.alert('No se pudo consultar cuántas noticias se eliminarían.');
+
+        return;
+    }
+
+    if (count === 0) {
+        window.alert('No hay noticias fuera de estado «procesado» para borrar.');
+
+        return;
+    }
+
+    const ok = window.confirm(
+        `¿Eliminar ${count} noticia(s) que NO están totalmente procesadas?\n\n`
+            + 'Se conservan solo las que tienen detalle «processed» y status_ia «processed».\n'
+            + `Quedarían ${kept} noticia(s) procesadas (esta cifra no incluye las que se borran ahora).\n`
+            + 'Se borran filas en news, news_details y news_ai_articles, e imágenes locales en disco.\n'
+            + 'Los posts en WordPress NO se eliminan.',
+    );
+
+    if (!ok) {
+        return;
+    }
+
+    purgeNonProcessedForm.post(route('scraper.purge-non-processed'), {
+        preserveScroll: true,
+        onSuccess: () => {
+            closePurgeModal();
+            router.reload({ only: ['stats', 'news'], preserveScroll: true });
+        },
     });
 }
 
@@ -746,14 +899,30 @@ function closePreview() {
 <template>
     <AppLayout>
         <div class="mx-auto max-w-6xl">
-            <div class="mb-8">
-                <h2 class="text-2xl font-semibold">Scraper → Esquina Anime</h2>
-                <p class="mt-1 text-sm text-slate-400">
-                    Pipeline de noticias: scrape, IA y envío a WordPress
-                    <template v-if="pipeline.wordpress_url">
-                        (<span class="text-slate-300">{{ pipeline.wordpress_url }}</span>)
-                    </template>
-                </p>
+            <div class="mb-8 flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <h2 class="text-2xl font-semibold">Scraper → Esquina Anime</h2>
+                    <p class="mt-1 text-sm text-slate-400">
+                        Pipeline de noticias: scrape, IA y envío a WordPress
+                        <template v-if="pipeline.wordpress_url">
+                            (<span class="text-slate-300">{{ pipeline.wordpress_url }}</span>)
+                        </template>
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    class="inline-flex items-center gap-2 rounded-xl border border-red-800/60 bg-red-950/30 px-4 py-2.5 text-sm font-medium text-red-100 shadow-sm hover:bg-red-950/50"
+                    @click="openPurgeModal('lote')"
+                >
+                    <span aria-hidden="true">🗑</span>
+                    Limpieza de noticias
+                    <span
+                        v-if="stats.total_news"
+                        class="rounded-md bg-slate-900/80 px-1.5 py-0.5 text-xs tabular-nums text-slate-400"
+                    >
+                        {{ stats.total_news }}
+                    </span>
+                </button>
             </div>
 
             <section class="mb-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
@@ -870,34 +1039,16 @@ function closePreview() {
                     <code class="text-slate-500">news:attach-wordpress-featured-images --all</code>
                 </p>
 
-                <div class="mt-4 rounded-xl border border-red-900/50 bg-red-950/20 p-3">
-                    <div class="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                            <h4 class="text-sm font-medium text-red-200">Limpiar publicados (solo app)</h4>
-                            <p class="mt-1 max-w-xl text-xs text-slate-400">
-                                Borra noticias anime con pipeline completo y
-                                <span class="text-slate-300">wordpress_status = publish</span>.
-                                Excluye programados y borradores. No elimina posts en WordPress.
-                            </p>
-                            <p class="mt-1 text-xs text-slate-500">
-                                Elegibles ahora:
-                                <span class="font-medium text-red-200/90">{{ stats.wp_publish_purge_ready }}</span>
-                            </p>
-                        </div>
-                        <button
-                            type="button"
-                            class="rounded-lg border border-red-700/70 bg-red-950/50 px-3 py-1.5 text-sm text-red-200 hover:bg-red-900/40 disabled:opacity-50"
-                            :disabled="purgePublishedForm.processing || stats.wp_publish_purge_ready === 0"
-                            @click="purgePublishedLocal"
-                        >
-                            {{
-                                purgePublishedForm.processing
-                                    ? 'Eliminando…'
-                                    : 'Eliminar publicados completos'
-                            }}
-                        </button>
-                    </div>
-                </div>
+                <p class="mt-3 text-xs text-slate-500">
+                    Borrar noticias por lote o atajos:
+                    <button
+                        type="button"
+                        class="text-violet-300 underline decoration-violet-500/40 hover:text-violet-200"
+                        @click="openPurgeModal('lote')"
+                    >
+                        Abrir limpieza
+                    </button>
+                </p>
 
                 <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
                     <button
@@ -1553,6 +1704,194 @@ function closePreview() {
                 </div>
             </div>
         </div>
+
+        <Teleport to="body">
+            <div
+                v-if="purgeModalOpen"
+                class="fixed inset-0 z-[9998] flex items-end justify-center p-0 sm:items-center sm:p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="purge-modal-title"
+            >
+                <button
+                    type="button"
+                    class="absolute inset-0 bg-black/70 backdrop-blur-sm"
+                    aria-label="Cerrar"
+                    @click="closePurgeModal"
+                />
+
+                <div
+                    class="relative flex max-h-[min(92vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:rounded-2xl"
+                >
+                    <div class="flex shrink-0 items-start justify-between gap-3 border-b border-slate-800 px-4 py-3">
+                        <div>
+                            <h3 id="purge-modal-title" class="text-base font-semibold text-white">
+                                Limpieza de noticias
+                            </h3>
+                            <p class="mt-0.5 text-xs text-slate-400">
+                                Solo app local · WordPress no se modifica
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            class="rounded-lg px-2 py-1 text-xl leading-none text-slate-400 hover:bg-slate-800 hover:text-white"
+                            @click="closePurgeModal"
+                        >
+                            ×
+                        </button>
+                    </div>
+
+                    <div class="flex shrink-0 gap-1 border-b border-slate-800 px-3 py-2">
+                        <button
+                            type="button"
+                            class="rounded-lg px-3 py-1.5 text-xs font-medium transition"
+                            :class="purgeModalTab === 'lote'
+                                ? 'bg-violet-600 text-white'
+                                : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'"
+                            @click="purgeModalTab = 'lote'"
+                        >
+                            Por status_ia
+                        </button>
+                        <button
+                            type="button"
+                            class="rounded-lg px-3 py-1.5 text-xs font-medium transition"
+                            :class="purgeModalTab === 'atajos'
+                                ? 'bg-violet-600 text-white'
+                                : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'"
+                            @click="purgeModalTab = 'atajos'"
+                        >
+                            Atajos
+                        </button>
+                    </div>
+
+                    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                        <div v-if="purgeModalTab === 'lote'">
+                            <div class="flex flex-wrap items-center gap-2 text-xs">
+                                <button
+                                    type="button"
+                                    class="rounded border border-slate-600 px-2 py-0.5 text-slate-300 hover:bg-slate-800"
+                                    @click="selectAllStatusIaKeys"
+                                >
+                                    Todos
+                                </button>
+                                <button
+                                    type="button"
+                                    class="rounded border border-slate-600 px-2 py-0.5 text-slate-300 hover:bg-slate-800"
+                                    @click="clearStatusIaKeys"
+                                >
+                                    Ninguno
+                                </button>
+                                <button
+                                    type="button"
+                                    class="rounded border border-slate-600 px-2 py-0.5 text-slate-400 hover:bg-slate-800"
+                                    @click="refreshStatusIaBreakdown"
+                                >
+                                    Actualizar
+                                </button>
+                            </div>
+
+                            <div
+                                v-if="statusIaBreakdown.length"
+                                class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3"
+                            >
+                                <button
+                                    v-for="row in statusIaBreakdown"
+                                    :key="row.key"
+                                    type="button"
+                                    class="rounded-xl border px-2.5 py-2 text-left transition"
+                                    :class="selectedStatusIaKeys.includes(row.key)
+                                        ? 'border-violet-500 bg-violet-950/50 ring-1 ring-violet-500/40'
+                                        : 'border-slate-700 bg-slate-950/60 hover:border-slate-600'"
+                                    @click="toggleStatusIaKey(row.key)"
+                                >
+                                    <span class="block truncate font-mono text-[11px] leading-tight text-slate-300">
+                                        {{ row.label }}
+                                    </span>
+                                    <span class="mt-0.5 block text-lg font-semibold tabular-nums text-white">
+                                        {{ row.count }}
+                                    </span>
+                                </button>
+                            </div>
+                            <p v-else class="mt-3 text-xs text-slate-500">No hay filas en news.</p>
+                        </div>
+
+                        <div v-else class="space-y-3">
+                            <div class="rounded-xl border border-amber-800/50 bg-amber-950/20 p-3">
+                                <p class="text-sm font-medium text-amber-100">No procesados</p>
+                                <p class="mt-1 text-xs text-slate-400">
+                                    Quita todo excepto detalle + IA «processed».
+                                </p>
+                                <p class="mt-2 text-xs text-slate-500">
+                                    Borrar
+                                    <span class="font-semibold text-amber-200">{{ stats.non_processed_purge_ready }}</span>
+                                    · Conservar
+                                    <span class="font-semibold text-emerald-300">{{ stats.processed_news_kept }}</span>
+                                </p>
+                                <button
+                                    type="button"
+                                    class="mt-2 w-full rounded-lg border border-amber-700/60 bg-amber-950/40 py-2 text-sm text-amber-100 hover:bg-amber-900/30 disabled:opacity-50"
+                                    :disabled="purgeNonProcessedForm.processing || stats.non_processed_purge_ready === 0"
+                                    @click="purgeNonProcessedLocal"
+                                >
+                                    {{
+                                        purgeNonProcessedForm.processing
+                                            ? 'Eliminando…'
+                                            : 'Eliminar no procesados'
+                                    }}
+                                </button>
+                            </div>
+
+                            <div class="rounded-xl border border-red-900/50 bg-red-950/25 p-3">
+                                <p class="text-sm font-medium text-red-100">Publicados completos</p>
+                                <p class="mt-1 text-xs text-slate-400">
+                                    Pipeline OK y WP «publish» (no programados).
+                                </p>
+                                <p class="mt-2 text-xs text-slate-500">
+                                    Elegibles:
+                                    <span class="font-semibold text-red-200">{{ stats.wp_publish_purge_ready }}</span>
+                                </p>
+                                <button
+                                    type="button"
+                                    class="mt-2 w-full rounded-lg border border-red-700/60 bg-red-950/50 py-2 text-sm text-red-100 hover:bg-red-900/40 disabled:opacity-50"
+                                    :disabled="purgePublishedForm.processing || stats.wp_publish_purge_ready === 0"
+                                    @click="purgePublishedLocal"
+                                >
+                                    {{
+                                        purgePublishedForm.processing
+                                            ? 'Eliminando…'
+                                            : 'Eliminar publicados completos'
+                                    }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div
+                        v-if="purgeModalTab === 'lote'"
+                        class="shrink-0 border-t border-slate-800 bg-slate-900/95 px-4 py-3"
+                    >
+                        <p class="mb-2 text-center text-xs text-slate-400">
+                            <span class="font-semibold tabular-nums text-violet-200">{{ selectedStatusIaTotal }}</span>
+                            noticia(s) en
+                            <span class="tabular-nums">{{ selectedStatusIaKeys.length }}</span>
+                            lote(s) seleccionado(s)
+                        </p>
+                        <button
+                            type="button"
+                            class="w-full rounded-xl bg-violet-600 py-2.5 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50"
+                            :disabled="purgeByStatusForm.processing || selectedStatusIaKeys.length === 0 || selectedStatusIaTotal === 0"
+                            @click="purgeByStatusLocal"
+                        >
+                            {{
+                                purgeByStatusForm.processing
+                                    ? 'Eliminando…'
+                                    : 'Eliminar lote seleccionado'
+                            }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Teleport>
     </AppLayout>
 </template>
 

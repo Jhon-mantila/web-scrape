@@ -35,6 +35,16 @@ Route::middleware('auth')->group(function () {
     Route::post('/scraper/sync-wordpress', [ScraperController::class, 'syncWordpressStatus'])->name('scraper.sync-wordpress');
     Route::get('/scraper/purge-published/count', [ScraperController::class, 'purgePublishedCount'])->name('scraper.purge-published.count');
     Route::post('/scraper/purge-published', [ScraperController::class, 'purgePublished'])->name('scraper.purge-published');
+    Route::get('/scraper/purge-non-processed/count', [ScraperController::class, 'purgeNonProcessedCount'])
+        ->name('scraper.purge-non-processed.count');
+    Route::post('/scraper/purge-non-processed', [ScraperController::class, 'purgeNonProcessed'])
+        ->name('scraper.purge-non-processed');
+    Route::get('/scraper/purge-by-status/breakdown', [ScraperController::class, 'purgeByStatusBreakdown'])
+        ->name('scraper.purge-by-status.breakdown');
+    Route::post('/scraper/purge-by-status/count', [ScraperController::class, 'purgeByStatusCount'])
+        ->name('scraper.purge-by-status.count');
+    Route::post('/scraper/purge-by-status', [ScraperController::class, 'purgeByStatus'])
+        ->name('scraper.purge-by-status');
     Route::post('/scraper/attach-wordpress-featured-images', [ScraperController::class, 'attachWordpressFeaturedImages'])
         ->name('scraper.attach-wordpress-featured-images');
     Route::post('/scraper/download-featured-images', [ScraperController::class, 'downloadFeaturedImages'])
@@ -109,6 +119,8 @@ Route::middleware('auth')->group(function () {
         ->name('videos.publications.publish');
     Route::delete('/videos/{video}/publications/{publication}/facebook', [SocialVideoController::class, 'destroyOnFacebook'])
         ->name('videos.publications.facebook.destroy');
+    Route::delete('/videos/{video}/publications/{publication}/youtube', [SocialVideoController::class, 'destroyOnYouTube'])
+        ->name('videos.publications.youtube.destroy');
     Route::delete('/videos/{video}/publications/{publication}', [SocialVideoController::class, 'destroyPublication'])
         ->name('videos.publications.destroy');
 });
