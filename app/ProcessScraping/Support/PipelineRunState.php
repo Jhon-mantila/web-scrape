@@ -26,6 +26,37 @@ class PipelineRunState
     }
 
     /**
+     * @param  array<string, mixed>  $options  Debe incluir news_ids (list<int>)
+     * @return array<string, mixed>
+     */
+    public static function startBulkRegenerateAi(int $userId, array $options): array
+    {
+        /** @var list<int> $newsIds */
+        $newsIds = array_values(array_unique(array_map('intval', $options['news_ids'] ?? [])));
+        $steps = [];
+
+        foreach ($newsIds as $newsId) {
+            $steps[] = [
+                'key' => 'news_'.$newsId,
+                'label' => "Noticia #{$newsId}",
+                'status' => 'pending',
+                'detail' => null,
+            ];
+        }
+
+        $count = count($newsIds);
+
+        return BackgroundRunQueue::enqueue($userId, [
+            'kind' => 'bulk_regenerate_ai',
+            'label' => "Regenerar IA ({$count} noticia".($count === 1 ? '' : 's').')',
+            'options' => $options,
+            'job' => ['type' => 'bulk_regenerate_ai', 'options' => $options],
+            'steps' => $steps,
+            'message' => 'Preparando regeneración IA…',
+        ]);
+    }
+
+    /**
      * @param  list<array<string, mixed>>  $steps
      * @return array<string, mixed>
      */
@@ -122,6 +153,15 @@ class PipelineRunState
 
         if ($runId !== null) {
             BackgroundRunQueue::skipStep($userId, $runId, $stepKey, $detail);
+        }
+    }
+
+    public static function setRunningStepDetail(int $userId, string $stepKey, string $detail): void
+    {
+        $runId = self::activeRunId($userId);
+
+        if ($runId !== null) {
+            BackgroundRunQueue::setRunningStepDetail($userId, $runId, $stepKey, $detail);
         }
     }
 

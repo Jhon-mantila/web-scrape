@@ -1,7 +1,11 @@
 <script setup>
 import axios from 'axios';
 import { Link, router, useForm } from '@inertiajs/vue3';
-import { syncBackgroundRunAfterInertiaStart } from '@/support/backgroundRun.js';
+import {
+    backgroundRunRequestHeaders,
+    emitBackgroundRunStarted,
+    syncBackgroundRunAfterInertiaStart,
+} from '@/support/backgroundRun.js';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import VideoOllamaCaptionFields from '@/Components/VideoOllamaCaptionFields.vue';
@@ -84,6 +88,7 @@ const pipelineForm = useForm({
     skip_generate: false,
     force: false,
     include_raw_html: true,
+    use_editorial_agent: props.pipeline.use_editorial_agent ?? false,
 });
 
 const syncWpForm = useForm({});
@@ -257,10 +262,107 @@ const previewError = ref('');
 const previewData = ref(null);
 const previewNewsId = ref(null);
 const regeneratingAi = ref(false);
+const regenerateProgress = ref(null);
+let regenerateProgressPollTimer = null;
 const regenerateIncludeRawHtml = ref(true);
+const regenerateUseEditorialAgent = ref(false);
 const regenerateArticleAiProvider = ref('ollama_local');
 const regenerateArticleOllamaTarget = ref('local');
 const regenerateArticleAiModel = ref('qwen3:14b');
+const selectedRegenerateIds = ref([]);
+const bulkRegenerateStarting = ref(false);
+
+const regeneratableOnPage = computed(() =>
+    props.news.data.filter((item) => item.can_regenerate),
+);
+
+const selectedRegenerateCount = computed(() => selectedRegenerateIds.value.length);
+
+const allRegeneratableOnPageSelected = computed(() => {
+    const ids = regeneratableOnPage.value.map((item) => item.id);
+
+    return ids.length > 0 && ids.every((id) => selectedRegenerateIds.value.includes(id));
+});
+
+function isRegenerateSelected(newsId) {
+    return selectedRegenerateIds.value.includes(newsId);
+}
+
+function toggleRegenerateSelection(newsId, checked) {
+    if (checked) {
+        if (!selectedRegenerateIds.value.includes(newsId)) {
+            selectedRegenerateIds.value = [...selectedRegenerateIds.value, newsId];
+        }
+    } else {
+        selectedRegenerateIds.value = selectedRegenerateIds.value.filter((id) => id !== newsId);
+    }
+}
+
+function toggleSelectAllRegeneratableOnPage() {
+    const pageIds = regeneratableOnPage.value.map((item) => item.id);
+
+    if (allRegeneratableOnPageSelected.value) {
+        selectedRegenerateIds.value = selectedRegenerateIds.value.filter((id) => !pageIds.includes(id));
+    } else {
+        selectedRegenerateIds.value = [...new Set([...selectedRegenerateIds.value, ...pageIds])];
+    }
+}
+
+function bulkRegenerateArticleAiProvider() {
+    return pipelineForm.article_ai_provider === 'none'
+        ? 'ollama_local'
+        : pipelineForm.article_ai_provider;
+}
+
+async function bulkRegenerateSelectedAi() {
+    const ids = selectedRegenerateIds.value.filter((id) =>
+        props.news.data.some((item) => item.id === id && item.can_regenerate),
+    );
+
+    if (ids.length === 0 || bulkRegenerateStarting.value) {
+        return;
+    }
+
+    if (pipelineForm.article_ai_provider === 'none') {
+        window.alert('Elige Ollama local o DeepSeek en «IA para artículos» antes de regenerar.');
+        return;
+    }
+
+    const agentHint = pipelineForm.use_editorial_agent ? ' (agente Neuron)' : '';
+
+    if (
+        !window.confirm(
+            `¿Regenerar con IA ${ids.length} noticia(s) en segundo plano${agentHint}?`,
+        )
+    ) {
+        return;
+    }
+
+    bulkRegenerateStarting.value = true;
+
+    try {
+        const { data } = await axios.post(
+            route('scraper.regenerate-ai.bulk'),
+            {
+                news_ids: ids,
+                include_raw_html: pipelineForm.include_raw_html,
+                use_editorial_agent: pipelineForm.use_editorial_agent,
+                article_ai_provider: bulkRegenerateArticleAiProvider(),
+                article_ollama_target: pipelineForm.article_ollama_target,
+                article_ai_model: pipelineForm.article_ai_model,
+            },
+            { headers: backgroundRunRequestHeaders() },
+        );
+
+        emitBackgroundRunStarted(data.run, data.snapshot);
+        selectedRegenerateIds.value = [];
+    } catch (error) {
+        window.alert(error.response?.data?.message ?? 'No se pudo iniciar la regeneración en lote.');
+    } finally {
+        bulkRegenerateStarting.value = false;
+    }
+}
+
 function onEscapeKey(event) {
     if (event.key === 'Escape' && previewOpen.value) {
         closePreview();
@@ -358,6 +460,10 @@ const pipelineCliCommand = computed(() => {
 
     if (pipelineForm.include_raw_html) {
         flags.push('--include-raw-html');
+    }
+
+    if (pipelineForm.use_editorial_agent) {
+        flags.push('--use-editorial-agent');
     }
 
     return buildArtisanCommand('news:pipeline', flags);
@@ -837,6 +943,7 @@ async function openPreview(item) {
     previewError.value = '';
     previewData.value = null;
     regenerateIncludeRawHtml.value = pipelineForm.include_raw_html;
+    regenerateUseEditorialAgent.value = pipelineForm.use_editorial_agent;
     regenerateArticleAiProvider.value = pipelineForm.article_ai_provider === 'none'
         ? 'ollama_local'
         : pipelineForm.article_ai_provider;
@@ -853,6 +960,33 @@ async function openPreview(item) {
     }
 }
 
+function stopRegenerateProgressPoll() {
+    if (regenerateProgressPollTimer !== null) {
+        window.clearInterval(regenerateProgressPollTimer);
+        regenerateProgressPollTimer = null;
+    }
+}
+
+async function fetchRegenerateProgress() {
+    if (!previewNewsId.value) {
+        return;
+    }
+
+    try {
+        const { data } = await axios.get(route('scraper.ai-generation-progress', previewNewsId.value));
+        regenerateProgress.value = data.progress ?? null;
+    } catch {
+        // ignore poll errors
+    }
+}
+
+function startRegenerateProgressPoll() {
+    stopRegenerateProgressPoll();
+    regenerateProgress.value = null;
+    fetchRegenerateProgress();
+    regenerateProgressPollTimer = window.setInterval(fetchRegenerateProgress, 1500);
+}
+
 async function regeneratePreviewAi() {
     if (!previewNewsId.value || !previewData.value?.can_regenerate || regeneratingAi.value) {
         return;
@@ -864,12 +998,14 @@ async function regeneratePreviewAi() {
 
     regeneratingAi.value = true;
     previewError.value = '';
+    startRegenerateProgressPoll();
 
     try {
         const { data } = await axios.post(
             route('scraper.regenerate-ai', previewNewsId.value),
             {
                 include_raw_html: regenerateIncludeRawHtml.value,
+                use_editorial_agent: regenerateUseEditorialAgent.value,
                 article_ai_provider: regenerateArticleAiProvider.value,
                 article_ollama_target: regenerateArticleOllamaTarget.value,
                 article_ai_model: regenerateArticleAiModel.value,
@@ -881,18 +1017,22 @@ async function regeneratePreviewAi() {
     } catch (error) {
         previewError.value = error.response?.data?.message || 'No se pudo regenerar el artículo con IA.';
     } finally {
+        await fetchRegenerateProgress();
+        stopRegenerateProgressPoll();
         regeneratingAi.value = false;
         router.reload({ only: ['news', 'stats'], preserveScroll: true });
     }
 }
 
 function closePreview() {
+    stopRegenerateProgressPoll();
     previewOpen.value = false;
     previewLoading.value = false;
     previewError.value = '';
     previewData.value = null;
     previewNewsId.value = null;
     regeneratingAi.value = false;
+    regenerateProgress.value = null;
 }
 </script>
 
@@ -1252,6 +1392,18 @@ function closePreview() {
                             <input v-model="pipelineForm.include_raw_html" type="checkbox" class="rounded border-slate-600 bg-slate-950" />
                             <span>include-raw-html</span>
                         </label>
+                        <label
+                            v-if="pipeline.editorial_agent_available"
+                            class="flex cursor-pointer items-center gap-1.5 text-sm text-slate-300"
+                            title="Desmarcado: ficha de hechos + Ollama (recomendado). Marcado: agente Neuron (plan → borrador → crítica)."
+                        >
+                            <input
+                                v-model="pipelineForm.use_editorial_agent"
+                                type="checkbox"
+                                class="rounded border-slate-600 bg-slate-950"
+                            />
+                            <span>Agente editorial Neuron</span>
+                        </label>
                     </div>
 
                     <button
@@ -1302,7 +1454,7 @@ function closePreview() {
                         id="scraper-search"
                         v-model="searchQuery"
                         type="search"
-                        placeholder="Título, URL, fuente…"
+                        placeholder="ID, #485, título, URL…"
                         class="w-44 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-sm sm:w-52"
                         @input="onSearchInput"
                     />
@@ -1423,12 +1575,58 @@ function closePreview() {
             </div>
 
             <div v-else class="space-y-3">
+                <div
+                    v-if="regeneratableOnPage.length > 0"
+                    class="flex flex-wrap items-center gap-3 rounded-xl border border-violet-800/50 bg-violet-950/20 px-3 py-2.5 text-sm"
+                >
+                    <label class="flex cursor-pointer items-center gap-2 text-slate-200">
+                        <input
+                            type="checkbox"
+                            class="rounded border-slate-600 bg-slate-950"
+                            :checked="allRegeneratableOnPageSelected"
+                            @change="toggleSelectAllRegeneratableOnPage()"
+                        />
+                        <span class="text-xs">Seleccionar elegibles en esta página</span>
+                    </label>
+                    <span v-if="selectedRegenerateCount > 0" class="text-xs text-violet-200">
+                        {{ selectedRegenerateCount }} seleccionada(s)
+                    </span>
+                    <button
+                        type="button"
+                        class="rounded-lg border border-violet-600/60 bg-violet-900/40 px-3 py-1.5 text-xs font-medium text-violet-100 hover:bg-violet-900/60 disabled:opacity-50"
+                        :disabled="selectedRegenerateCount === 0 || bulkRegenerateStarting"
+                        @click="bulkRegenerateSelectedAi"
+                    >
+                        {{
+                            bulkRegenerateStarting
+                                ? 'Iniciando…'
+                                : `Regenerar IA (${selectedRegenerateCount || 0})`
+                        }}
+                    </button>
+                    <span class="text-[11px] text-slate-500">
+                        Usa opciones del pipeline: include-raw-html y agente Neuron.
+                    </span>
+                </div>
+
                 <article
                     v-for="item in news.data"
                     :key="item.id"
                     class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4"
+                    :class="isRegenerateSelected(item.id) ? 'ring-1 ring-violet-600/50' : ''"
                 >
                     <div class="flex flex-wrap gap-4">
+                        <label
+                            v-if="item.can_regenerate"
+                            class="flex shrink-0 cursor-pointer items-start pt-1"
+                            :title="`Seleccionar noticia #${item.id} para regenerar IA`"
+                        >
+                            <input
+                                type="checkbox"
+                                class="rounded border-slate-600 bg-slate-950"
+                                :checked="isRegenerateSelected(item.id)"
+                                @change="toggleRegenerateSelection(item.id, $event.target.checked)"
+                            />
+                        </label>
                         <img
                             v-if="item.image_url"
                             :src="item.image_url"
@@ -1564,25 +1762,54 @@ function closePreview() {
 
         <div
             v-if="previewOpen"
-            class="fixed inset-0 z-[10050] flex items-center justify-center bg-black/75 p-4"
+            class="fixed inset-0 z-[10050] flex items-end justify-center bg-black/80 p-0 backdrop-blur-sm sm:items-center sm:p-4"
             @click.self="closePreview"
         >
-            <div class="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
-                <div class="flex shrink-0 items-start justify-between gap-4 border-b border-slate-800 px-5 py-4">
-                    <div class="min-w-0 flex-1">
-                        <p class="text-xs uppercase tracking-wide text-violet-400">Vista previa · WordPress</p>
-                        <h3 class="mt-1 text-lg font-semibold">
-                            {{ previewData?.title || (previewLoading ? 'Cargando…' : 'Vista previa') }}
-                        </h3>
-                        <p v-if="previewData?.source_title && previewData.source_title !== previewData.title" class="mt-1 text-xs text-slate-500">
-                            Título original: {{ previewData.source_title }}
-                        </p>
+            <div
+                class="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-2xl border border-slate-700/90 bg-slate-900 shadow-2xl sm:max-h-[92vh] sm:rounded-2xl"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="preview-modal-title"
+            >
+                <header class="shrink-0 border-b border-slate-800 bg-slate-900/95 px-4 py-3 sm:px-6 sm:py-4">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <p class="text-[11px] font-medium uppercase tracking-wider text-violet-400/90">
+                                Vista previa · WordPress
+                            </p>
+                            <p
+                                v-if="previewNewsId"
+                                class="mt-1 text-xs tabular-nums text-slate-500"
+                            >
+                                Noticia #{{ previewNewsId }}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            class="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+                            aria-label="Cerrar vista previa"
+                            :disabled="regeneratingAi"
+                            @click="closePreview"
+                        >
+                            <span class="sr-only">Cerrar</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                            </svg>
+                        </button>
                     </div>
-                    <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                        <template v-if="previewData?.can_regenerate">
+                </header>
+
+                <div
+                    v-if="previewData?.can_regenerate"
+                    class="shrink-0 border-b border-slate-800 bg-slate-950/70 px-4 py-3 sm:px-6"
+                >
+                    <p class="mb-2.5 text-xs font-medium text-slate-400">Regenerar con IA</p>
+                    <div class="flex flex-col gap-3 lg:flex-row lg:items-end">
+                        <label class="block min-w-0 flex-1 text-xs text-slate-500">
+                            <span class="mb-1 block text-slate-400">Proveedor</span>
                             <select
                                 v-model="regenerateArticleAiProvider"
-                                class="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white"
+                                class="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
                                 :disabled="regeneratingAi || previewLoading"
                             >
                                 <option
@@ -1594,111 +1821,242 @@ function closePreview() {
                                     {{ opt.label }}
                                 </option>
                             </select>
-                            <label class="flex cursor-pointer items-center gap-1.5 text-xs text-slate-400">
+                        </label>
+
+                        <div class="flex flex-wrap items-center gap-2">
+                            <label
+                                class="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-xs text-slate-300 transition hover:border-slate-600"
+                                :class="regenerateIncludeRawHtml ? 'border-violet-500/40 bg-violet-950/20' : ''"
+                            >
                                 <input
                                     v-model="regenerateIncludeRawHtml"
                                     type="checkbox"
-                                    class="rounded border-slate-600 bg-slate-950"
+                                    class="rounded border-slate-600 bg-slate-950 text-violet-600 focus:ring-violet-500"
                                     :disabled="regeneratingAi || previewLoading"
                                 />
-                                include-raw-html
+                                HTML original
                             </label>
-                            <button
-                                type="button"
-                                class="rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium hover:bg-violet-500 disabled:opacity-50"
-                                :disabled="regeneratingAi || previewLoading"
-                                @click="regeneratePreviewAi"
+                            <label
+                                v-if="pipeline.editorial_agent_available"
+                                class="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-xs text-slate-300 transition hover:border-slate-600"
+                                :class="regenerateUseEditorialAgent ? 'border-violet-500/40 bg-violet-950/20' : ''"
+                                title="Desactivado: ficha de hechos (recomendado). Activado: agente Neuron."
                             >
-                                {{ regeneratingAi ? 'Regenerando IA…' : 'Regenerar con IA' }}
-                            </button>
-                        </template>
+                                <input
+                                    v-model="regenerateUseEditorialAgent"
+                                    type="checkbox"
+                                    class="rounded border-slate-600 bg-slate-950 text-violet-600 focus:ring-violet-500"
+                                    :disabled="regeneratingAi || previewLoading"
+                                />
+                                Agente Neuron
+                            </label>
+                        </div>
+
                         <button
                             type="button"
-                            class="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
-                            :disabled="regeneratingAi"
-                            @click="closePreview"
+                            class="w-full shrink-0 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-900/30 transition hover:bg-violet-500 disabled:opacity-50 lg:w-auto"
+                            :disabled="regeneratingAi || previewLoading"
+                            @click="regeneratePreviewAi"
                         >
-                            Cerrar
+                            {{ regeneratingAi ? 'Generando…' : 'Regenerar artículo' }}
                         </button>
                     </div>
+                    <p class="mt-2 text-[11px] leading-relaxed text-slate-500">
+                        {{
+                            regenerateUseEditorialAgent
+                                ? 'Modo agente: varios pasos; puede tardar varios minutos.'
+                                : 'Modo ficha: suele dar artículos más largos y estables.'
+                        }}
+                    </p>
                 </div>
 
                 <div class="min-h-0 flex-1 overflow-y-auto">
-                    <div v-if="previewLoading || regeneratingAi" class="p-10 text-center text-slate-400">
-                        {{ regeneratingAi ? 'Regenerando artículo con IA… puede tardar 1–2 minutos.' : 'Cargando artículo…' }}
+                    <div
+                        v-if="previewLoading || regeneratingAi"
+                        class="flex flex-col items-center justify-center gap-4 px-6 py-16 text-center"
+                    >
+                        <div
+                            class="h-10 w-10 animate-spin rounded-full border-2 border-slate-700 border-t-violet-500"
+                            aria-hidden="true"
+                        />
+                        <div class="w-full max-w-md text-left">
+                            <p class="text-sm font-medium text-slate-200">
+                                {{ regeneratingAi ? 'Regenerando con IA' : 'Cargando vista previa' }}
+                            </p>
+                            <p
+                                v-if="regenerateProgress?.motor_label"
+                                class="mt-1 text-xs text-violet-300/90"
+                            >
+                                {{ regenerateProgress.motor_label }}
+                            </p>
+                            <p
+                                v-if="regenerateProgress?.current_label"
+                                class="mt-2 text-xs text-slate-300"
+                            >
+                                Paso {{ regenerateProgress.current_step }}/{{ regenerateProgress.total_steps }}:
+                                {{ regenerateProgress.current_label }}
+                            </p>
+                            <p
+                                v-if="regenerateProgress && (regenerateProgress.elapsed_seconds || regenerateProgress.tokens_total)"
+                                class="mt-1 text-xs tabular-nums text-slate-500"
+                            >
+                                <span v-if="regenerateProgress.elapsed_seconds">
+                                    {{ regenerateProgress.elapsed_seconds }} s
+                                </span>
+                                <span v-if="regenerateProgress.tokens_total">
+                                    · {{ regenerateProgress.tokens_total }} tokens
+                                </span>
+                            </p>
+                            <ul
+                                v-if="regenerateProgress?.steps?.length"
+                                class="mt-4 max-h-40 space-y-1 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-[11px] text-slate-400"
+                            >
+                                <li
+                                    v-for="(entry, idx) in regenerateProgress.steps"
+                                    :key="idx"
+                                    class="leading-snug"
+                                >
+                                    <span class="text-slate-500">{{ entry.step }}/{{ entry.total }}</span>
+                                    {{ entry.label }}
+                                    <span v-if="entry.tokens" class="text-slate-600"> · {{ entry.tokens }} tok</span>
+                                </li>
+                            </ul>
+                            <p
+                                v-else-if="regeneratingAi"
+                                class="mt-1 max-w-sm text-xs text-slate-500"
+                            >
+                                {{
+                                    regenerateUseEditorialAgent
+                                        ? 'Agente editorial en curso; no cierres esta ventana.'
+                                        : 'Esto puede tardar 1–3 minutos.'
+                                }}
+                            </p>
+                            <p v-else class="mt-1 text-xs text-slate-500">
+                                Obteniendo título, extracto y cuerpo del artículo.
+                            </p>
+                        </div>
                     </div>
 
-                    <div v-else-if="previewError" class="p-10 text-center text-red-300">
-                        {{ previewError }}
+                    <div v-else-if="previewError" class="mx-auto max-w-md px-6 py-16 text-center">
+                        <p class="rounded-xl border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+                            {{ previewError }}
+                        </p>
                     </div>
 
                     <article v-else-if="previewData" class="article-preview">
-                        <img
-                            v-if="previewData.image_url"
-                            :src="previewData.image_url"
-                            :alt="previewData.title"
-                            class="w-full max-h-80 object-cover"
-                        />
+                        <div v-if="previewData.image_url" class="relative bg-slate-950">
+                            <img
+                                :src="previewData.image_url"
+                                :alt="previewData.title"
+                                class="max-h-72 w-full object-cover sm:max-h-80"
+                            />
+                        </div>
 
-                        <div class="border-b border-slate-800 bg-slate-950/50 px-6 py-4">
-                            <div class="flex flex-wrap gap-2 text-xs text-slate-500">
-                                <span v-if="previewData.category">Categoría: {{ previewData.category }}</span>
-                                <span v-if="previewData.source">· {{ previewData.source }}</span>
-                                <span v-if="previewData.model">· Modelo: {{ previewData.model }}</span>
-                                <span v-if="previewData.image_source">· Imagen: {{ previewData.image_source }}</span>
+                        <div class="mx-auto max-w-3xl px-4 py-6 sm:px-8 sm:py-8">
+                            <div class="mb-4 flex flex-wrap gap-2">
+                                <span
+                                    v-if="previewData.category"
+                                    class="rounded-full bg-slate-800 px-2.5 py-0.5 text-xs text-slate-300"
+                                >
+                                    {{ previewData.category }}
+                                </span>
+                                <span
+                                    v-if="previewData.source"
+                                    class="rounded-full bg-slate-800/80 px-2.5 py-0.5 text-xs text-slate-400"
+                                >
+                                    {{ previewData.source }}
+                                </span>
                                 <span
                                     v-if="previewData.word_count != null"
-                                    class="font-medium tabular-nums"
+                                    class="rounded-full px-2.5 py-0.5 text-xs font-medium tabular-nums"
                                     :class="previewData.word_count >= (previewData.min_word_count ?? 350)
-                                        ? 'text-emerald-400'
-                                        : 'text-amber-400'"
+                                        ? 'bg-emerald-950/60 text-emerald-300 ring-1 ring-emerald-800/50'
+                                        : 'bg-amber-950/50 text-amber-200 ring-1 ring-amber-800/50'"
                                 >
-                                    · {{ previewData.word_count }} palabras
+                                    {{ previewData.word_count }} palabras
                                     <template v-if="previewData.min_word_count">
-                                        (mín. {{ previewData.min_word_count }})
+                                        · mín. {{ previewData.min_word_count }}
                                     </template>
                                 </span>
                                 <span
                                     v-if="previewData.sent_wordpress && previewData.wordpress_status === 'future'"
-                                    class="text-sky-400"
+                                    class="rounded-full bg-sky-950/50 px-2.5 py-0.5 text-xs text-sky-300 ring-1 ring-sky-800/40"
                                 >
-                                    · Programado WP: {{ formatDate(previewData.wordpress_scheduled_at) }}
+                                    Programado WP
                                 </span>
                                 <span
                                     v-else-if="previewData.sent_wordpress"
-                                    class="text-emerald-400"
+                                    class="rounded-full bg-emerald-950/50 px-2.5 py-0.5 text-xs text-emerald-300 ring-1 ring-emerald-800/40"
                                 >
-                                    · {{ wpStatusLabel(previewData.wordpress_status) }} en WP
+                                    {{ wpStatusLabel(previewData.wordpress_status) }} en WP
                                 </span>
-                                <span v-else class="text-amber-400">· Pendiente de envío</span>
+                                <span
+                                    v-else
+                                    class="rounded-full bg-amber-950/40 px-2.5 py-0.5 text-xs text-amber-200 ring-1 ring-amber-800/40"
+                                >
+                                    Pendiente de envío
+                                </span>
                             </div>
 
-                            <p v-if="previewData.excerpt" class="mt-3 text-sm italic text-slate-300">
+                            <h1
+                                id="preview-modal-title"
+                                class="text-balance text-2xl font-bold leading-tight tracking-tight text-white sm:text-3xl"
+                            >
+                                {{ previewData.title }}
+                            </h1>
+
+                            <p
+                                v-if="previewData.source_title && previewData.source_title !== previewData.title"
+                                class="mt-3 text-sm leading-relaxed text-slate-500"
+                            >
+                                <span class="text-slate-600">Título ANN ·</span>
+                                {{ previewData.source_title }}
+                            </p>
+
+                            <p
+                                v-if="previewData.excerpt"
+                                class="mt-5 border-l-2 border-violet-500/60 pl-4 text-base italic leading-relaxed text-slate-300"
+                            >
                                 {{ previewData.excerpt }}
                             </p>
-                            <p v-else class="mt-3 text-sm italic text-slate-500">
+
+                            <p v-else class="mt-4 text-sm text-slate-600">
                                 Sin extracto
                             </p>
-                        </div>
 
-                        <div
-                            class="article-preview-body px-6 py-6"
-                            v-html="previewData.body_html"
-                        />
-
-                        <div class="border-t border-slate-800 px-6 py-4 text-xs text-slate-500">
-                            <a
-                                v-if="previewData.source_url"
-                                :href="previewData.source_url"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                class="text-violet-400 hover:underline"
+                            <div
+                                v-if="previewData.model || previewData.image_source"
+                                class="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600"
                             >
-                                Fuente original
-                            </a>
-                            <span v-if="previewData.sent_wordpress_at" class="ml-3 text-emerald-400">
-                                Enviado: {{ formatDate(previewData.sent_wordpress_at) }}
-                            </span>
+                                <span v-if="previewData.model">Modelo: {{ previewData.model }}</span>
+                                <span v-if="previewData.image_source">Imagen: {{ previewData.image_source }}</span>
+                                <span
+                                    v-if="previewData.sent_wordpress && previewData.wordpress_status === 'future'"
+                                >
+                                    {{ formatDate(previewData.wordpress_scheduled_at) }}
+                                </span>
+                            </div>
+
+                            <div
+                                class="article-preview-body prose-invert mt-8 border-t border-slate-800 pt-8"
+                                v-html="previewData.body_html"
+                            />
+
+                            <footer class="mt-10 flex flex-wrap items-center gap-4 border-t border-slate-800 pt-6 text-sm">
+                                <a
+                                    v-if="previewData.source_url"
+                                    :href="previewData.source_url"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="inline-flex items-center gap-1.5 font-medium text-violet-400 hover:text-violet-300"
+                                >
+                                    Ver fuente original
+                                    <span aria-hidden="true">↗</span>
+                                </a>
+                                <span v-if="previewData.sent_wordpress_at" class="text-slate-500">
+                                    Enviado a WP · {{ formatDate(previewData.sent_wordpress_at) }}
+                                </span>
+                            </footer>
                         </div>
                     </article>
                 </div>

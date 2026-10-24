@@ -25,6 +25,10 @@ class PipelineSummaryFormatter
 
         $parts[] = 'IA OK '.$summary['ai']['success'].'/'.$summary['ai']['processed'];
 
+        if (($summary['ai']['tokens_total'] ?? 0) > 0) {
+            $parts[] = number_format((int) $summary['ai']['tokens_total']).' tokens IA';
+        }
+
         if ($options['send_wordpress'] ?? false) {
             $parts[] = $this->wordpressLine($summary['wordpress'], (string) ($options['mode'] ?? 'draft'));
         } else {

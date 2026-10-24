@@ -32,6 +32,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/scraper/ollama-models', [ScraperController::class, 'ollamaModels'])->name('scraper.ollama-models');
     Route::get('/scraper/news/{news}/preview', [ScraperController::class, 'preview'])->name('scraper.preview');
     Route::post('/scraper/news/{news}/regenerate-ai', [ScraperController::class, 'regenerateAi'])->name('scraper.regenerate-ai');
+    Route::post('/scraper/regenerate-ai/bulk', [ScraperController::class, 'bulkRegenerateAi'])->name('scraper.regenerate-ai.bulk');
+    Route::get('/scraper/news/{news}/ai-generation-progress', [ScraperController::class, 'aiGenerationProgress'])
+        ->name('scraper.ai-generation-progress');
     Route::post('/scraper/sync-wordpress', [ScraperController::class, 'syncWordpressStatus'])->name('scraper.sync-wordpress');
     Route::get('/scraper/purge-published/count', [ScraperController::class, 'purgePublishedCount'])->name('scraper.purge-published.count');
     Route::post('/scraper/purge-published', [ScraperController::class, 'purgePublished'])->name('scraper.purge-published');

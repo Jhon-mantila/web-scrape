@@ -9,19 +9,23 @@ class FactSheetArticlePrompt
         return PromptLibrary::system($articleType ?? 'default');
     }
 
-    public static function user(string $factSheetJson, ?string $articleType): string
+    public static function user(string $factSheetJson, ?string $articleType, ?string $seoReference = null): string
     {
         $type = $articleType ?? 'default';
         $tone = PromptLibrary::userExtra($type);
+        $seoBlock = $seoReference !== null && trim($seoReference) !== ''
+            ? "\n{$seoReference}\n"
+            : '';
 
         return <<<TXT
         Eres redactor de EsquinaAnime (Latinoamérica y España).
         Escribe en español neutro usando EXCLUSIVAMENTE la FICHA JSON.
+        PROHIBIDO entregar título o cuerpo en inglés.
         Si un dato no está en FICHA, no lo menciones ni lo supongas.
 
         TIPO DE ARTÍCULO: {$type}
         {$tone}
-
+        {$seoBlock}
         Estructura HTML (sin <h1>):
         - Entradilla en <p> (2-3 frases).
         - <h2>Qué se anunció</h2>

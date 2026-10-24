@@ -145,12 +145,18 @@ class RunNewsPipelineAction
         } else {
             $this->progressBegin($progressUserId, 'ai', 'Generando artículos con IA…');
             $stepStarted = microtime(true);
-            $ai = $this->generateAi->execute($limit, $force, $includeRawHtml, $batchIds);
+            $ai = $this->generateAi->execute($limit, $force, $includeRawHtml, $batchIds, false, $progressUserId);
             $timings['ai'] = microtime(true) - $stepStarted;
+            $aiDetail = "IA OK {$ai['success']}/{$ai['processed']}";
+
+            if (($ai['tokens_total'] ?? 0) > 0) {
+                $aiDetail .= ' · '.number_format((int) $ai['tokens_total']).' tokens';
+            }
+
             $this->progressFinish(
                 $progressUserId,
                 'ai',
-                "IA OK {$ai['success']}/{$ai['processed']}",
+                $aiDetail,
             );
 
             $this->unloadOllamaIfNeeded($ai['processed'] > 0);

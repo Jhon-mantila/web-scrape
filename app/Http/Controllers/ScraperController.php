@@ -17,6 +17,7 @@ use App\ProcessScraping\Ai\Support\AiSettings;
 use App\ProcessScraping\Support\ScraperArticleAiContext;
 use App\SocialPublishing\Enums\VideoCaptionAiProvider;
 use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
+use App\ProcessScraping\Support\AiGenerationProgress;
 use App\ProcessScraping\Support\ArticleWordCounter;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
@@ -61,14 +62,20 @@ class ScraperController extends Controller
             ->orderByDesc('id');
 
         if ($search !== '') {
-            $like = '%'.addcslashes($search, '%_\\').'%';
+            $newsId = self::parseNewsIdSearch($search);
 
-            $query->where(function ($builder) use ($like) {
-                $builder
-                    ->where('title', 'like', $like)
-                    ->orWhere('url', 'like', $like)
-                    ->orWhere('source', 'like', $like);
-            });
+            if ($newsId !== null) {
+                $query->where('news.id', $newsId);
+            } else {
+                $like = '%'.addcslashes($search, '%_\\').'%';
+
+                $query->where(function ($builder) use ($like) {
+                    $builder
+                        ->where('title', 'like', $like)
+                        ->orWhere('url', 'like', $like)
+                        ->orWhere('source', 'like', $like);
+                });
+            }
         }
 
         if ($pendingWordpress) {
@@ -146,6 +153,13 @@ class ScraperController extends Controller
         return response()->json($payload);
     }
 
+    public function aiGenerationProgress(News $news): JsonResponse
+    {
+        return response()->json([
+            'progress' => AiGenerationProgress::snapshot($news->id),
+        ]);
+    }
+
     public function regenerateAi(
         Request $request,
         News $news,
@@ -168,6 +182,7 @@ class ScraperController extends Controller
 
         $validated = $request->validate([
             'include_raw_html' => 'boolean',
+            'use_editorial_agent' => 'boolean',
             'article_ai_provider' => $this->articleAiProviderValidation(),
             'article_ollama_target' => $this->articleOllamaTargetValidation(),
             'article_ai_model' => $this->articleAiModelValidation(),
@@ -178,6 +193,12 @@ class ScraperController extends Controller
         if ($provider === VideoCaptionAiProvider::None->value) {
             return response()->json([
                 'message' => 'Elige Ollama local o DeepSeek para regenerar con IA.',
+            ], 422);
+        }
+
+        if ($request->boolean('use_editorial_agent') && ! config('services.editorial_agent.enabled', false)) {
+            return response()->json([
+                'message' => 'El agente editorial no está activo (EDITORIAL_AGENT_ENABLED=false en .env).',
             ], 422);
         }
 
@@ -197,9 +218,15 @@ class ScraperController extends Controller
         }
 
         if ($summary['success'] === 0) {
-            $error = $summary['errors'][0]['message'] ?? 'No se pudo regenerar el artículo con IA.';
+            $error = $summary['errors'][0]['message'] ?? null;
 
-            return response()->json(['message' => $error], 422);
+            if ($error === null && ($summary['processed'] ?? 0) === 0) {
+                $error = 'Esta noticia no está elegible para regenerar (detalle o status_ia).';
+            }
+
+            return response()->json([
+                'message' => $error ?? 'No se pudo regenerar el artículo con IA.',
+            ], 422);
         }
 
         if (AiSettings::shouldUnloadAfterGenerate()) {
@@ -223,6 +250,76 @@ class ScraperController extends Controller
         return response()->json([
             'message' => 'Artículo regenerado con IA.',
             'preview' => $payload,
+        ]);
+    }
+
+    public function bulkRegenerateAi(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if ($user === null) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'news_ids' => 'required|array|min:1|max:50',
+            'news_ids.*' => 'integer|min:1',
+            'include_raw_html' => 'boolean',
+            'use_editorial_agent' => 'boolean',
+            'article_ai_provider' => $this->articleAiProviderValidation(),
+            'article_ollama_target' => $this->articleOllamaTargetValidation(),
+            'article_ai_model' => $this->articleAiModelValidation(),
+        ]);
+
+        $provider = $validated['article_ai_provider'] ?? VideoCaptionAiProvider::OllamaLocal->value;
+
+        if ($provider === VideoCaptionAiProvider::None->value) {
+            return response()->json([
+                'message' => 'Elige Ollama local o DeepSeek para regenerar con IA.',
+            ], 422);
+        }
+
+        if ($request->boolean('use_editorial_agent') && ! config('services.editorial_agent.enabled', false)) {
+            return response()->json([
+                'message' => 'El agente editorial no está activo (EDITORIAL_AGENT_ENABLED=false en .env).',
+            ], 422);
+        }
+
+        /** @var list<int> $newsIds */
+        $newsIds = array_values(array_unique(array_map('intval', $validated['news_ids'])));
+
+        $options = [
+            'news_ids' => $newsIds,
+            'include_raw_html' => (bool) ($validated['include_raw_html'] ?? true),
+            'use_editorial_agent' => (bool) ($validated['use_editorial_agent'] ?? false),
+            'article_ai_provider' => $provider,
+            'article_ollama_target' => $validated['article_ollama_target']
+                ?? (string) config('services.scraper.article_ollama_target', OllamaConnectivity::TARGET_LOCAL),
+            'article_ai_model' => $validated['article_ai_model']
+                ?? (string) config('services.scraper.article_ai_default_model'),
+        ];
+
+        $run = PipelineRunState::startBulkRegenerateAi($user->id, $options);
+
+        try {
+            Bus::dispatchAfterResponse(function () use ($user): void {
+                app(ProcessBackgroundRunQueueAction::class)->execute($user->id);
+            });
+        } catch (Throwable $dispatchError) {
+            PipelineRunState::fail($user->id, 'No se pudo iniciar en segundo plano: '.$dispatchError->getMessage(), $run['id'] ?? null);
+            Log::error('bulk_regenerate_ai dispatch falló', ['message' => $dispatchError->getMessage()]);
+
+            return response()->json(['message' => $dispatchError->getMessage()], 500);
+        }
+
+        $snapshot = PipelineRunState::snapshot($user->id);
+
+        return response()->json([
+            'message' => ($run['status'] ?? '') === 'queued'
+                ? 'Regeneración IA en cola. Se ejecutará cuando termine el proceso anterior.'
+                : 'Regeneración IA iniciada en segundo plano.',
+            'run' => $run,
+            'snapshot' => $snapshot,
         ]);
     }
 
@@ -502,10 +599,21 @@ class ScraperController extends Controller
             'skip_generate' => 'boolean',
             'force' => 'boolean',
             'include_raw_html' => 'boolean',
+            'use_editorial_agent' => 'boolean',
             'article_ai_provider' => $this->articleAiProviderValidation(),
             'article_ollama_target' => $this->articleOllamaTargetValidation(),
             'article_ai_model' => $this->articleAiModelValidation(),
         ]);
+
+        if ($request->boolean('use_editorial_agent') && ! config('services.editorial_agent.enabled', false)) {
+            if (RequestsBackgroundJson::matches($request)) {
+                return response()->json([
+                    'message' => 'El agente editorial no está activo (EDITORIAL_AGENT_ENABLED=false en .env).',
+                ], 422);
+            }
+
+            return back()->with('error', 'El agente editorial no está activo (EDITORIAL_AGENT_ENABLED=false en .env).');
+        }
 
         $options = [
             ...$validated,
@@ -689,6 +797,15 @@ class ScraperController extends Controller
             'article_ai_provider' => VideoCaptionAiProvider::OllamaLocal->value,
             'article_ollama_target' => (string) config('services.scraper.article_ollama_target', OllamaConnectivity::TARGET_LOCAL),
             'article_ai_model' => (string) config('services.scraper.article_ai_default_model'),
+            'use_editorial_agent' => false,
+            'editorial_agent_available' => filter_var(
+                config('services.editorial_agent.enabled', false),
+                FILTER_VALIDATE_BOOLEAN,
+            ),
+            'anime_news_staged' => filter_var(
+                config('services.scraper.anime_news_staged', true),
+                FILTER_VALIDATE_BOOLEAN,
+            ),
             'ollama' => [
                 'remote_configured' => OllamaConnectivity::remoteConfigured(),
                 'remote_host' => $remoteHost,
@@ -738,6 +855,8 @@ class ScraperController extends Controller
                 'scraped_at' => $detail->scraped_at?->toIso8601String(),
                 'last_error' => $detail->last_error,
             ] : null,
+            'can_regenerate' => $detail?->status === 'processed'
+                && ! ($ai?->sent_wordpress ?? false),
             'ai' => $ai ? [
                 'generated_title' => $ai->generated_title,
                 'can_preview' => filled($ai->body_html),
@@ -853,8 +972,26 @@ class ScraperController extends Controller
         return $candidates;
     }
 
-    /**
-     * @param  array<string, mixed>  $summary
-     * @param  array<string, mixed>  $options
-     */
+    private static function parseNewsIdSearch(string $search): ?int
+    {
+        $trimmed = trim($search);
+
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (preg_match('/^#(\d+)$/', $trimmed, $matches)) {
+            return (int) $matches[1];
+        }
+
+        if (preg_match('/^id\s*[:#]?\s*(\d+)$/i', $trimmed, $matches)) {
+            return (int) $matches[1];
+        }
+
+        if (ctype_digit($trimmed)) {
+            return (int) $trimmed;
+        }
+
+        return null;
+    }
 }

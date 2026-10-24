@@ -183,6 +183,28 @@ class BackgroundRunQueue
         ]);
     }
 
+    public static function setRunningStepDetail(int $userId, string $runId, string $stepKey, string $detail): void
+    {
+        $run = self::find($userId, $runId);
+
+        if ($run === null) {
+            return;
+        }
+
+        $steps = $run['steps'] ?? [];
+
+        foreach ($steps as $index => $step) {
+            if (($step['key'] ?? '') === $stepKey) {
+                $steps[$index]['detail'] = $detail;
+            }
+        }
+
+        self::mergeRun($userId, $runId, [
+            'steps' => $steps,
+            'message' => $detail,
+        ]);
+    }
+
     public static function skipStep(int $userId, string $runId, string $stepKey, string $detail = 'Omitido'): void
     {
         $run = self::find($userId, $runId);

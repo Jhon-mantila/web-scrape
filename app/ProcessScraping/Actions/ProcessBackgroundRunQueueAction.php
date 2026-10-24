@@ -12,6 +12,7 @@ class ProcessBackgroundRunQueueAction
 {
     public function __construct(
         private readonly ExecutePipelineRunAction $pipelineRun,
+        private readonly ExecuteBulkRegenerateAiRunAction $bulkRegenerateAi,
         private readonly ExecuteSocialPublishRunAction $socialPublishRun,
     ) {}
 
@@ -39,6 +40,7 @@ class ProcessBackgroundRunQueueAction
                             (int) ($run['video_id'] ?? 0),
                             $run['publication_ids'] ?? null,
                         ),
+                        'bulk_regenerate_ai' => $this->bulkRegenerateAi->execute($userId, $runId),
                         default => $this->pipelineRun->execute($userId, $runId),
                     };
                 } catch (Throwable $e) {

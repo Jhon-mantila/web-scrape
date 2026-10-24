@@ -17,6 +17,7 @@ class NewsPipeline extends Command
                             {--skip-research : Omite la investigación con SearXNG}
                             {--skip-generate : Omite la generación FLUX cuando no hay imagen del scrape}
                             {--skip-wordpress : Omite el envío a WordPress al final del pipeline}
+                            {--use-editorial-agent : Usa el agente editorial Neuron en la etapa IA (si EDITORIAL_AGENT_ENABLED=true)}
                             {--show-errors : Muestra errores de generación IA en consola}';
 
     protected $description = 'Pipeline completo: scrape → detalles → imagen → investigación → IA → WordPress';
@@ -32,6 +33,10 @@ class NewsPipeline extends Command
         $startedAt = microtime(true);
 
         ScraperArticleAiContext::applyGlobalAiProviderFallback();
+
+        if ((bool) $this->option('use-editorial-agent')) {
+            ScraperArticleAiContext::setEditorialAgentPreference(true);
+        }
 
         try {
             $summary = $action->execute(

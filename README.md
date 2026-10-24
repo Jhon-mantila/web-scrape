@@ -3,7 +3,7 @@
 Proyecto en Laravel para:
 
 - Hacer scraping de noticias.
-- Enriquecer contenido con IA local (Ollama).
+- Enriquecer contenido con IA local (Ollama) y, opcionalmente, con el **Agente editorial Neuron** (ver [docs/EDITORIAL_AGENT.md](docs/EDITORIAL_AGENT.md)).
 - Publicar artículos en WordPress.
 
 ## Stack

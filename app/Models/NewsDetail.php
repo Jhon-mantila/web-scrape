@@ -10,6 +10,8 @@ class NewsDetail extends Model
     protected $fillable = [
         'news_id',
         'status',
+        'ai_status',
+        'ai_status_updated_at',
         'raw_html',
         'featured_image_path',
         'featured_image_source',
@@ -29,6 +31,7 @@ class NewsDetail extends Model
         'scraped_at' => 'datetime',
         'processed_at' => 'datetime',
         'researched_at' => 'datetime',
+        'ai_status_updated_at' => 'datetime',
         'research_raw' => 'array',
         'fact_sheet' => 'array',
         'grouped_sources' => 'array',

@@ -212,6 +212,26 @@ function runDurationLabel(run) {
     return seconds != null ? formatDuration(seconds) : null;
 }
 
+function runTokensTotal(run) {
+    const fromSummary = run.summary?.tokens_total;
+
+    if (fromSummary != null && Number(fromSummary) > 0) {
+        return Number(fromSummary);
+    }
+
+    const ai = run.summary?.ai?.tokens_total;
+
+    if (ai != null && Number(ai) > 0) {
+        return Number(ai);
+    }
+
+    return null;
+}
+
+function formatTokenCount(value) {
+    return new Intl.NumberFormat('es').format(Math.round(Number(value) || 0));
+}
+
 function runStatusLabel(status) {
     const map = {
         queued: 'En cola',
@@ -258,6 +278,13 @@ function stepIcon(status) {
 
 function showFullRunDetail(run) {
     return run.status === 'running' || run.status === 'queued';
+}
+
+function showExpandedFinishedDetail(run) {
+    return (
+        expandedRun.value?.id === run.id
+        && (run.status === 'completed' || run.status === 'failed')
+    );
 }
 
 </script>
@@ -338,6 +365,14 @@ function showFullRunDetail(run) {
                                     >
                                         · {{ runDurationLabel(run) }}
                                     </span>
+                                    <span
+                                        v-if="
+                                            (run.status === 'completed' || run.status === 'failed')
+                                            && runTokensTotal(run) != null
+                                        "
+                                    >
+                                        · {{ formatTokenCount(runTokensTotal(run)) }} tokens
+                                    </span>
                                     <span v-if="run.status === 'queued' && run.queue_position">
                                         · posición {{ run.queue_position }}
                                     </span>
@@ -392,10 +427,10 @@ function showFullRunDetail(run) {
                                     </span>
                                     <span class="min-w-0 flex-1">
                                         <span class="font-medium">{{ step.label }}</span>
-                                        <span v-if="step.status === 'running'" class="opacity-90">
+                                        <span v-if="step.status === 'running' && !step.detail" class="opacity-90">
                                             — en curso…
                                         </span>
-                                        <span v-else-if="step.detail" class="block opacity-75">
+                                        <span v-if="step.detail" class="mt-0.5 block text-[11px] leading-snug opacity-80">
                                             {{ step.detail }}
                                         </span>
                                     </span>
@@ -410,12 +445,42 @@ function showFullRunDetail(run) {
                             </p>
                         </div>
 
-                        <p
-                            v-else-if="expandedRun?.id === run.id && (run.status === 'completed' || run.status === 'failed')"
+                        <div
+                            v-else-if="showExpandedFinishedDetail(run)"
                             class="mt-2 border-t border-white/10 pt-2 text-xs leading-relaxed"
                         >
-                            {{ run.message }}
-                        </p>
+                            <p v-if="run.message" class="text-slate-200">
+                                {{ run.message }}
+                            </p>
+                            <p
+                                v-if="runDurationLabel(run) || runTokensTotal(run) != null"
+                                class="mt-1 text-[11px] text-slate-400"
+                            >
+                                <span v-if="runDurationLabel(run)">Duración: {{ runDurationLabel(run) }}</span>
+                                <span v-if="runTokensTotal(run) != null">
+                                    <span v-if="runDurationLabel(run)"> · </span>
+                                    Tokens IA: {{ formatTokenCount(runTokensTotal(run)) }}
+                                </span>
+                            </p>
+                            <ul v-if="run.steps?.length" class="mt-2 space-y-1">
+                                <li
+                                    v-for="step in run.steps"
+                                    :key="step.key"
+                                    class="flex gap-2 leading-snug"
+                                    :class="stepClass(step.status)"
+                                >
+                                    <span class="w-3 shrink-0 text-center font-mono">
+                                        {{ stepIcon(step.status) }}
+                                    </span>
+                                    <span class="min-w-0 flex-1">
+                                        <span class="font-medium">{{ step.label }}</span>
+                                        <span v-if="step.detail" class="mt-0.5 block text-[11px] opacity-80">
+                                            {{ step.detail }}
+                                        </span>
+                                    </span>
+                                </li>
+                            </ul>
+                        </div>
                     </li>
                 </ul>
 

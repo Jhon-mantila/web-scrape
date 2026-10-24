@@ -16,6 +16,9 @@ final class ScraperArticleAiContext
 
     private static bool $scraperOllamaRouting = false;
 
+    /** @var 'default'|'on'|'off' Preferencia UI/consola sobre agente editorial vs ficha staged */
+    private static string $editorialAgentPreference = 'default';
+
     public static function set(VideoCaptionAiProvider|string|null $provider): void
     {
         if ($provider === null || $provider === '') {
@@ -46,7 +49,26 @@ final class ScraperArticleAiContext
 
         self::$articleModel = $model !== '' ? $model : null;
 
+        if (array_key_exists('use_editorial_agent', $options)) {
+            self::setEditorialAgentPreference(
+                filter_var($options['use_editorial_agent'], FILTER_VALIDATE_BOOLEAN),
+            );
+        }
+
         self::$scraperOllamaRouting = true;
+    }
+
+    public static function setEditorialAgentPreference(bool $useEditorialAgent): void
+    {
+        self::$editorialAgentPreference = $useEditorialAgent ? 'on' : 'off';
+    }
+
+    /**
+     * @return 'default'|'on'|'off'
+     */
+    public static function editorialAgentPreference(): string
+    {
+        return self::$editorialAgentPreference;
     }
 
     public static function get(): VideoCaptionAiProvider
@@ -80,6 +102,7 @@ final class ScraperArticleAiContext
         self::$ollamaTarget = (string) config('services.scraper.article_ollama_target', OllamaConnectivity::TARGET_LOCAL);
         self::$articleModel = null;
         self::$scraperOllamaRouting = false;
+        self::$editorialAgentPreference = 'default';
     }
 
     /** Consola Artisan: respeta AI_PROVIDER global (deepseek u ollama_local). */

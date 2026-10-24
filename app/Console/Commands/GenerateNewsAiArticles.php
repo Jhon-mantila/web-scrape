@@ -12,7 +12,8 @@ class GenerateNewsAiArticles extends Command
                             {--limit=5 : Cuántas noticias procesar}
                             {--force : Incluye noticias ya marcadas status_ia=processed y sobrescribe el artículo IA}
                             {--include-raw-html : Añade raw_html al prompt además de content_text}
-                            {--show-errors : Muestra el mensaje de cada fallo en consola}';
+                            {--show-errors : Muestra el mensaje de cada fallo en consola}
+                            {--use-legacy-ai : Usa el cliente Ollama clásico en lugar del EditorialAgent Neuron}';
 
     protected $description = 'Genera artículos reescritos con Ollama y los guarda en news_ai_articles';
 
@@ -27,6 +28,8 @@ class GenerateNewsAiArticles extends Command
                 $limit,
                 (bool) $this->option('force'),
                 (bool) $this->option('include-raw-html'),
+                null,
+                (bool) $this->option('use-legacy-ai'),
             );
         } finally {
             ScraperArticleAiContext::reset();

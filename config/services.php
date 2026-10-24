@@ -175,4 +175,14 @@ return [
         'watermark_mask_full_width' => filter_var(env('FEATURED_IMAGE_WATERMARK_MASK_FULL_WIDTH', true), FILTER_VALIDATE_BOOLEAN),
     ],
 
+    /*
+    | Agente editorial Neuron (planificar → redactar → autocriticar → refinar).
+    | observer: log (dev), inspector (prod), both
+    */
+    'editorial_agent' => [
+        'enabled' => filter_var(env('EDITORIAL_AGENT_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+        'observer' => env('EDITORIAL_AGENT_OBSERVER', 'log'),
+        'inspector_ingestion_key' => env('INSPECTOR_INGESTION_KEY'),
+    ],
+
 ];
