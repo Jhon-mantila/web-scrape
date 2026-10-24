@@ -41,6 +41,12 @@ const form = useForm({
 
 const usesCaptionAi = computed(() => form.caption_ai_provider !== 'none');
 
+const notesMaxChars = computed(() => props.video?.notes_max_chars ?? 10000);
+
+const notesLength = computed(() => (form.notes ?? '').length);
+
+const notesOverLimit = computed(() => notesLength.value > notesMaxChars.value);
+
 const displayThumbnail = computed(() => thumbnailPreview.value || props.video.thumbnail_url || null);
 
 const publishablePublications = computed(() =>
@@ -655,10 +661,24 @@ function openSchedulePicker(event) {
                     <label class="mb-2 block text-sm text-slate-300">Notas (contexto para IA)</label>
                     <textarea
                         v-model="form.notes"
-                        rows="2"
-                        class="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5"
+                        rows="8"
+                        class="w-full rounded-xl border bg-slate-900 px-4 py-2.5 font-mono text-sm leading-relaxed"
+                        :class="notesOverLimit ? 'border-red-600 ring-1 ring-red-600/30' : 'border-slate-700'"
                         :disabled="!usesCaptionAi"
+                        :maxlength="notesMaxChars + 500"
                     />
+                    <p
+                        class="mt-1.5 text-xs"
+                        :class="notesOverLimit ? 'font-medium text-red-400' : 'text-slate-500'"
+                    >
+                        {{ notesLength }} / {{ notesMaxChars }} caracteres
+                        <span v-if="notesOverLimit"> — reduce el texto para poder guardar</span>
+                        <span v-else> — límite al guardar (BD: TEXT, sin tope práctico)</span>
+                    </p>
+                    <p v-if="form.errors.notes" class="mt-1 text-sm text-red-400">{{ form.errors.notes }}</p>
+                    <p v-else-if="!usesCaptionAi" class="mt-1 text-xs text-slate-500">
+                        Con «Sin IA» las notas no se usan; elige Ollama o DeepSeek para editarlas.
+                    </p>
                 </div>
 
                 <div

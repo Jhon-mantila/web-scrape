@@ -22,6 +22,10 @@ const props = defineProps({
         type: Object,
         default: () => ({}),
     },
+    notesMaxChars: {
+        type: Number,
+        default: 10000,
+    },
 });
 
 const videoHint = computed(() => {
@@ -78,6 +82,10 @@ const form = useForm({
     caption_ai_model: props.captionAiDefaults.caption_ai_model ?? 'qwen3:14b',
     platforms: props.platformOptions.filter((p) => p.enabled && !p.coming_soon).map((p) => p.key),
 });
+
+const notesLength = computed(() => (form.notes ?? '').length);
+
+const notesOverLimit = computed(() => notesLength.value > props.notesMaxChars);
 
 function onVideoPicked(file) {
     form.clearErrors('video');
@@ -214,10 +222,19 @@ function togglePlatform(key) {
                 <label class="mb-2 block text-sm text-slate-300">Notas (opcional, para la IA)</label>
                 <textarea
                     v-model="form.notes"
-                    rows="3"
-                    class="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5"
+                    rows="6"
+                    class="w-full rounded-xl border bg-slate-900 px-4 py-2.5 text-sm leading-relaxed"
+                    :class="notesOverLimit ? 'border-red-600 ring-1 ring-red-600/30' : 'border-slate-700'"
                     :disabled="form.caption_ai_provider === 'none'"
                 />
+                <p
+                    class="mt-1.5 text-xs"
+                    :class="notesOverLimit ? 'font-medium text-red-400' : 'text-slate-500'"
+                >
+                    {{ notesLength }} / {{ notesMaxChars }} caracteres
+                    <span v-if="notesOverLimit"> — supera el máximo al guardar</span>
+                </p>
+                <p v-if="form.errors.notes" class="mt-1 text-sm text-red-400">{{ form.errors.notes }}</p>
             </div>
 
             <div>

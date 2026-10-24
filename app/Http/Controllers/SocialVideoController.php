@@ -62,6 +62,7 @@ class SocialVideoController extends Controller
             'captionAiOptions' => $captionAi->optionsForUi(),
             'captionAiDefaults' => $this->captionAiDefaults(),
             'uploadLimits' => VideoUploadLimits::forUi(),
+            'notesMaxChars' => $this->videoNotesMaxChars(),
         ]);
     }
 
@@ -69,7 +70,7 @@ class SocialVideoController extends Controller
     {
         $validated = $request->validate([
             'title' => 'required|string|max:255',
-            'notes' => 'nullable|string|max:2000',
+            'notes' => 'nullable|string|max:'.$this->videoNotesMaxChars(),
             'platforms' => 'required|array|min:1',
             'platforms.*' => 'string|in:'.implode(',', Platform::values()),
             'video' => $this->videoUploadRules(),
@@ -152,7 +153,7 @@ class SocialVideoController extends Controller
 
         $validated = $request->validate([
             'title' => 'sometimes|string|max:255',
-            'notes' => 'nullable|string|max:2000',
+            'notes' => 'nullable|string|max:'.$this->videoNotesMaxChars(),
             'thumbnail' => $this->thumbnailUploadRules(),
             'publications' => 'sometimes|array',
             'publications.*.id' => 'required|integer|exists:social_publications,id',
@@ -168,7 +169,10 @@ class SocialVideoController extends Controller
 
         if (isset($validated['title'])) {
             $updates['title'] = $validated['title'];
-            $updates['notes'] = $validated['notes'] ?? $video->notes;
+        }
+
+        if (array_key_exists('notes', $validated)) {
+            $updates['notes'] = $validated['notes'];
         }
 
         if (array_key_exists('caption_ai_provider', $validated) && $validated['caption_ai_provider'] !== null) {
@@ -572,6 +576,7 @@ class SocialVideoController extends Controller
             'id' => $video->id,
             'title' => $video->title,
             'notes' => $video->notes,
+            'notes_max_chars' => $this->videoNotesMaxChars(),
             'video_url' => $videoOnDisk ? $this->publicStorageUrl($video->video_path) : null,
             'video_missing' => ! $videoOnDisk,
             'video_size_bytes' => $videoSizeBytes,
@@ -631,10 +636,18 @@ class SocialVideoController extends Controller
      */
     private function uploadValidationMessages(): array
     {
+        $notesMax = $this->videoNotesMaxChars();
+
         return [
             'video.max' => 'El video no puede superar '.VideoUploadLimits::mbLabel(VideoUploadLimits::videoMaxMb()).'.',
             'thumbnail.max' => 'La miniatura no puede superar '.VideoUploadLimits::mbLabel(VideoUploadLimits::thumbnailMaxMb()).'.',
+            'notes.max' => "Las notas superan el máximo de {$notesMax} caracteres permitidos al guardar.",
         ];
+    }
+
+    private function videoNotesMaxChars(): int
+    {
+        return max(500, (int) config('social.video_notes_max_chars', 10000));
     }
 
     private function thumbnailUploadRules(): string

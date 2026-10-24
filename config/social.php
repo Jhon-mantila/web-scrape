@@ -80,6 +80,9 @@ return [
         ],
     ],
 
+    /** Contexto para IA en revisar/subir video (campo notes, tipo TEXT en BD). */
+    'video_notes_max_chars' => (int) env('SOCIAL_VIDEO_NOTES_MAX_CHARS', 10000),
+
     'upload' => [
         'max_video_mb' => (int) env('SOCIAL_MAX_VIDEO_MB', 1024),
         'max_thumbnail_mb' => (int) env('SOCIAL_MAX_THUMBNAIL_MB', 10),
