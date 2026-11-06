@@ -22,6 +22,8 @@ use App\ProcessScraping\Support\ArticleWordCounter;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
 use App\Scraper\Actions\DeleteFullyPublishedScraperNewsAction;
+use App\Scraper\Actions\DeleteNewsAiPreviewAction;
+use App\Scraper\Actions\DeleteSingleScraperNewsAction;
 use App\Scraper\Actions\DeleteNewsByStatusIaScraperAction;
 use App\Scraper\Actions\DeleteNonProcessedScraperNewsAction;
 use App\Scraper\Support\NewsScraperStats;
@@ -251,6 +253,57 @@ class ScraperController extends Controller
             'message' => 'Artículo regenerado con IA.',
             'preview' => $payload,
         ]);
+    }
+
+    public function discardAiPreview(News $news, DeleteNewsAiPreviewAction $action): RedirectResponse|JsonResponse
+    {
+        $news->loadMissing(['detail', 'aiArticle']);
+
+        try {
+            $action->execute($news);
+        } catch (Throwable $e) {
+            if (RequestsBackgroundJson::matches(request())) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            return back()->with('error', $e->getMessage());
+        }
+
+        if (RequestsBackgroundJson::matches(request())) {
+            return response()->json([
+                'message' => 'Artículo IA eliminado. Puedes volver a generarlo con el pipeline o regenerar.',
+            ]);
+        }
+
+        return back()->with('success', 'Artículo IA eliminado. La noticia scrapeada se conserva; puedes generar de nuevo.');
+    }
+
+    public function destroyNews(News $news, DeleteSingleScraperNewsAction $action): RedirectResponse|JsonResponse
+    {
+        try {
+            $summary = $action->execute($news);
+        } catch (Throwable $e) {
+            if (RequestsBackgroundJson::matches(request())) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            return back()->with('error', $e->getMessage());
+        }
+
+        $message = sprintf(
+            'Noticia #%d eliminada de la app (detalle, IA e imagen local). WordPress no se modificó.',
+            $news->id,
+        );
+
+        if ($summary['images_deleted'] > 0) {
+            $message .= ' Imagen destacada borrada del disco.';
+        }
+
+        if (RequestsBackgroundJson::matches(request())) {
+            return response()->json(['message' => $message, 'summary' => $summary]);
+        }
+
+        return back()->with('success', $message);
     }
 
     public function bulkRegenerateAi(Request $request): JsonResponse
@@ -857,6 +910,10 @@ class ScraperController extends Controller
             ] : null,
             'can_regenerate' => $detail?->status === 'processed'
                 && ! ($ai?->sent_wordpress ?? false),
+            'can_discard_ai' => $ai !== null
+                && filled($ai->body_html)
+                && ! $ai->sent_wordpress,
+            'can_delete_news' => $news->merged_into_news_id === null,
             'ai' => $ai ? [
                 'generated_title' => $ai->generated_title,
                 'can_preview' => filled($ai->body_html),
@@ -898,6 +955,8 @@ class ScraperController extends Controller
             $news->detail?->raw_html,
             $news->detail?->research_context,
             $news->detail?->research_raw,
+            $news->title,
+            $news->detail?->content_text,
         );
 
         return [
@@ -915,6 +974,7 @@ class ScraperController extends Controller
             ...$this->wordpressAiPayload($ai),
             'image_source' => $news->detail?->featured_image_source,
             'can_regenerate' => ! $ai->sent_wordpress && $news->detail?->status === 'processed',
+            'can_discard_ai' => ! $ai->sent_wordpress && filled($ai->body_html),
             'word_count' => ArticleWordCounter::fromHtml($ai->body_html),
             'min_word_count' => (int) config('services.scraper.anime_news_min_words', 350),
         ];

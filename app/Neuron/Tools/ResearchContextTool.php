@@ -11,9 +11,9 @@ use NeuronAI\Tools\ToolProperty;
 
 class ResearchContextTool extends Tool
 {
-    protected string $name = 'research_context';
+    protected string $name = 'consultar_investigacion';
 
-    protected ?string $description = 'Obtiene research_context y research_raw de una fila news_details por su id.';
+    protected ?string $description = 'Devuelve la investigación verificada de la noticia (hechos y extractos de fuentes). Uso interno del editor; no citar nombres técnicos al lector.';
 
     protected function properties(): array
     {
@@ -21,7 +21,7 @@ class ResearchContextTool extends Tool
             new ToolProperty(
                 name: 'news_detail_id',
                 type: PropertyType::INTEGER,
-                description: 'ID primario de la tabla news_details',
+                description: 'Identificador interno del detalle de noticia (solo para invocar la herramienta)',
                 required: true,
             ),
         ];
@@ -39,11 +39,9 @@ class ResearchContextTool extends Tool
         }
 
         return json_encode([
-            'news_detail_id' => $detail->id,
-            'news_id' => $detail->news_id,
-            'research_context' => $detail->research_context,
-            'research_raw' => $detail->research_raw,
-            'researched_at' => $detail->researched_at?->toIso8601String(),
+            'investigacion_verificada' => $detail->research_context,
+            'extractos_fuentes' => $detail->research_raw,
+            'fecha_investigacion' => $detail->researched_at?->toIso8601String(),
         ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     }
 }

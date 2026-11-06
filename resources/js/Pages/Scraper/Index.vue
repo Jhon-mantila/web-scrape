@@ -262,6 +262,8 @@ const previewError = ref('');
 const previewData = ref(null);
 const previewNewsId = ref(null);
 const regeneratingAi = ref(false);
+const discardingAi = ref(false);
+const deletingNewsId = ref(null);
 const regenerateProgress = ref(null);
 let regenerateProgressPollTimer = null;
 const regenerateIncludeRawHtml = ref(true);
@@ -985,6 +987,78 @@ function startRegenerateProgressPoll() {
     regenerateProgress.value = null;
     fetchRegenerateProgress();
     regenerateProgressPollTimer = window.setInterval(fetchRegenerateProgress, 1500);
+}
+
+async function deleteNewsCompletely(item) {
+    if (!item?.id || deletingNewsId.value !== null || discardingAi.value) {
+        return;
+    }
+
+    const wpNote = item.ai?.sent_wordpress
+        ? ' Esta noticia ya está en WordPress: solo se borra en esta app; el post en WP no se elimina.'
+        : '';
+
+    if (
+        !window.confirm(
+            `¿Eliminar por completo la noticia #${item.id}? Se borran detalle scrapeado, artículo IA, imagen local y la fila del listado.${wpNote}`,
+        )
+    ) {
+        return;
+    }
+
+    deletingNewsId.value = item.id;
+
+    try {
+        await router.delete(route('scraper.news.destroy', item.id), {
+            preserveScroll: true,
+            onSuccess: () => {
+                if (previewNewsId.value === item.id) {
+                    closePreview();
+                }
+            },
+            onError: (errors) => {
+                const msg = errors?.message ?? Object.values(errors ?? {})[0];
+
+                window.alert(typeof msg === 'string' ? msg : 'No se pudo eliminar la noticia.');
+            },
+        });
+    } finally {
+        deletingNewsId.value = null;
+    }
+}
+
+async function discardAiPreview(newsId, { closeModal = false } = {}) {
+    if (!newsId || discardingAi.value || regeneratingAi.value) {
+        return;
+    }
+
+    if (
+        !window.confirm(
+            `¿Eliminar el artículo IA de la noticia #${newsId}? Se conserva el scrape; podrás generar de nuevo antes de WordPress.`,
+        )
+    ) {
+        return;
+    }
+
+    discardingAi.value = true;
+
+    try {
+        await router.delete(route('scraper.discard-ai', newsId), {
+            preserveScroll: true,
+            onSuccess: () => {
+                if (closeModal || previewNewsId.value === newsId) {
+                    closePreview();
+                }
+            },
+            onError: (errors) => {
+                const msg = errors?.message ?? Object.values(errors ?? {})[0];
+
+                window.alert(typeof msg === 'string' ? msg : 'No se pudo eliminar el artículo IA.');
+            },
+        });
+    } finally {
+        discardingAi.value = false;
+    }
 }
 
 async function regeneratePreviewAi() {
@@ -1733,6 +1807,28 @@ function closePreview() {
                                         · {{ item.ai.word_count }} palabras
                                     </span>
                                 </button>
+                                <button
+                                    v-if="item.can_discard_ai"
+                                    type="button"
+                                    class="rounded-lg border border-red-900/50 px-3 py-1.5 text-sm text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+                                    :disabled="discardingAi || deletingNewsId === item.id"
+                                    @click="discardAiPreview(item.id)"
+                                >
+                                    {{ discardingAi ? 'Eliminando…' : 'Eliminar artículo IA' }}
+                                </button>
+                                <button
+                                    v-if="item.can_delete_news"
+                                    type="button"
+                                    class="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-400 hover:border-red-900/50 hover:bg-red-950/30 hover:text-red-300 disabled:opacity-50"
+                                    :disabled="deletingNewsId === item.id || discardingAi"
+                                    @click="deleteNewsCompletely(item)"
+                                >
+                                    {{
+                                        deletingNewsId === item.id
+                                            ? 'Eliminando…'
+                                            : 'Eliminar noticia completa'
+                                    }}
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1852,14 +1948,25 @@ function closePreview() {
                             </label>
                         </div>
 
-                        <button
-                            type="button"
-                            class="w-full shrink-0 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-900/30 transition hover:bg-violet-500 disabled:opacity-50 lg:w-auto"
-                            :disabled="regeneratingAi || previewLoading"
-                            @click="regeneratePreviewAi"
-                        >
-                            {{ regeneratingAi ? 'Generando…' : 'Regenerar artículo' }}
-                        </button>
+                        <div class="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap lg:w-auto">
+                            <button
+                                type="button"
+                                class="w-full shrink-0 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-900/30 transition hover:bg-violet-500 disabled:opacity-50 sm:w-auto"
+                                :disabled="regeneratingAi || previewLoading || discardingAi"
+                                @click="regeneratePreviewAi"
+                            >
+                                {{ regeneratingAi ? 'Generando…' : 'Regenerar artículo' }}
+                            </button>
+                            <button
+                                v-if="previewData?.can_discard_ai"
+                                type="button"
+                                class="w-full shrink-0 rounded-xl border border-red-800/60 bg-red-950/30 px-4 py-2.5 text-sm font-medium text-red-200 transition hover:bg-red-950/50 disabled:opacity-50 sm:w-auto"
+                                :disabled="regeneratingAi || previewLoading || discardingAi"
+                                @click="discardAiPreview(previewNewsId, { closeModal: true })"
+                            >
+                                {{ discardingAi ? 'Eliminando…' : 'Eliminar artículo IA' }}
+                            </button>
+                        </div>
                     </div>
                     <p class="mt-2 text-[11px] leading-relaxed text-slate-500">
                         {{
@@ -1867,6 +1974,23 @@ function closePreview() {
                                 ? 'Modo agente: varios pasos; puede tardar varios minutos.'
                                 : 'Modo ficha: suele dar artículos más largos y estables.'
                         }}
+                    </p>
+                </div>
+
+                <div
+                    v-else-if="previewData?.can_discard_ai"
+                    class="shrink-0 border-b border-slate-800 bg-slate-950/70 px-4 py-3 sm:px-6"
+                >
+                    <button
+                        type="button"
+                        class="rounded-xl border border-red-800/60 bg-red-950/30 px-4 py-2 text-sm font-medium text-red-200 hover:bg-red-950/50 disabled:opacity-50"
+                        :disabled="regeneratingAi || previewLoading || discardingAi"
+                        @click="discardAiPreview(previewNewsId, { closeModal: true })"
+                    >
+                        {{ discardingAi ? 'Eliminando…' : 'Eliminar artículo IA' }}
+                    </button>
+                    <p class="mt-2 text-[11px] text-slate-500">
+                        Quita solo el contenido generado; el scrape original se mantiene.
                     </p>
                 </div>
 

@@ -41,18 +41,20 @@ class EditorialAgent extends Agent
                 'Trabajas con material scrapeado (a menudo en inglés) e investigación verificada.',
                 'Redactas SIEMPRE en español neutro (Latinoamérica y España). Nunca publiques título ni cuerpo en inglés.',
                 'No inventes hechos: si falta información, dilo explícitamente.',
+                'Nunca menciones al lector nombres de base de datos, herramientas internas ni IDs técnicos. Integra la investigación como periodismo natural.',
                 AnimeNewsWritingGuidelines::sourceContext(),
                 AnimeNewsWritingGuidelines::structureAndStyle(),
             ],
             steps: [
-                '1. Planificación: analiza título, texto scrapeado e investigación (usa la herramienta research_context cuando te lo indiquen) y produce un outline estructurado.',
+                '1. Planificación: analiza título, texto scrapeado e investigación verificada (herramienta consultar_investigacion cuando se indique) y produce un outline estructurado.',
                 '2. Redacción: escribe el artículo siguiendo el outline, tono informativo y cercano, en HTML semántico dentro del JSON final cuando se pida.',
-                '3. Autocrítica: compara el borrador con research_context; señala omisiones, invenciones o tono inadecuado.',
+                '3. Autocrítica: compara el borrador con la investigación verificada; señala omisiones, invenciones o tono inadecuado.',
                 '4. Refinamiento: si hace falta, corrige el borrador según el feedback manteniendo formato solicitado.',
             ],
             output: [
                 'Sigue las instrucciones de cada mensaje de usuario sobre formato (outline Markdown, JSON de borrador, JSON de crítica, JSON final).',
                 'Para artículos finales usa JSON con claves: title, excerpt, html (fragmento HTML del cuerpo, sin documento completo).',
+                'Prohibido que title, excerpt o html contengan jerga técnica del sistema.',
             ],
         );
     }

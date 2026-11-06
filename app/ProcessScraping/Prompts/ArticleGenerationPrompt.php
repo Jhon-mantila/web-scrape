@@ -74,7 +74,7 @@ class ArticleGenerationPrompt
 
         if (! empty($youtubeEmbeds)) {
             $blocks[] = '';
-            $blocks[] = 'VIDEOS DE YOUTUBE DISPONIBLES (fuente original y/o investigación web; solo puedes usar estos; inserta uno como máximo):';
+            $blocks[] = 'VIDEOS DE YOUTUBE DISPONIBLES (noticia original y/o investigación verificada sobre este tema; inserta uno como máximo si aporta):';
 
             foreach ($youtubeEmbeds as $embed) {
                 $blocks[] = $embed;

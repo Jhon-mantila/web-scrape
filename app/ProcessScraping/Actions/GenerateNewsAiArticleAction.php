@@ -20,6 +20,7 @@ use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
 use App\ProcessScraping\Prompts\ArticleGenerationPrompt;
 use App\ProcessScraping\Prompts\ArticleTypeClassifier;
 use App\ProcessScraping\Prompts\FactSheetArticlePrompt;
+use App\ProcessScraping\Support\GeneratedArticleLeakGuard;
 use App\ProcessScraping\Support\HtmlArticleSanitizer;
 use App\ProcessScraping\Support\YoutubeExtractor;
 use App\Services\EditorialService;
@@ -121,6 +122,8 @@ class GenerateNewsAiArticleAction
                     $detail->raw_html ?? null,
                     $detail->research_context,
                     $detail->research_raw,
+                    $news->title,
+                    $detail->content_text,
                 );
                 $model = $this->modelSelector->forNews($news, $detail->content_text);
 
@@ -218,6 +221,8 @@ class GenerateNewsAiArticleAction
 
                 $parts['body_html'] = HtmlArticleSanitizer::sanitize($parts['body_html'], $youtubeEmbeds);
                 $parts['body_html'] = HtmlArticleSanitizer::ensureYoutubeEmbed($parts['body_html'], $youtubeEmbeds);
+
+                $parts = GeneratedArticleLeakGuard::scrubParts($parts);
 
                 $titleError = $this->qualityReviewer->validateGeneratedTitle($parts['generated_title'] ?? null);
 
@@ -517,8 +522,9 @@ class GenerateNewsAiArticleAction
             $qualityError = $this->qualityReviewer->validateHtml($html, (string) $estado);
 
             if ($qualityError === null) {
-                $parsed['body_html'] = $html;
-                $wc = ArticleWordCounter::fromHtml($html);
+                $parsed = GeneratedArticleLeakGuard::scrubParts($parsed);
+                $parsed['body_html'] = GeneratedArticleLeakGuard::scrub($html) ?? $html;
+                $wc = ArticleWordCounter::fromHtml((string) $parsed['body_html']);
                 AiGenerationProgress::pulse($news->id, 4, 4, "Ficha OK · {$wc} palabras");
 
                 break;

@@ -94,6 +94,8 @@ class SendPostToWordpressAction
                     $article->news->detail?->raw_html,
                     $article->news->detail?->research_context,
                     $article->news->detail?->research_raw,
+                    $article->news->title,
+                    $article->news->detail?->content_text,
                 );
 
                 $postTitle = trim((string) ($article->generated_title ?? ''));

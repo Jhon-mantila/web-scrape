@@ -30,6 +30,12 @@ class ArticleQualityReviewer
             return 'El título SEO supera 70 caracteres ('.mb_strlen($trimmed).').';
         }
 
+        $leak = GeneratedArticleLeakGuard::findLeak($trimmed);
+
+        if ($leak !== null) {
+            return 'El título contiene referencias internas del sistema ('.$leak.').';
+        }
+
         return null;
     }
 
@@ -96,6 +102,12 @@ class ArticleQualityReviewer
             if (str_contains($text, $snippet)) {
                 return 'El artículo contiene frases prohibidas del estilo plantilla.';
             }
+        }
+
+        $leak = GeneratedArticleLeakGuard::findLeak($html);
+
+        if ($leak !== null) {
+            return 'El artículo menciona términos internos ('.$leak.'); redacta solo para lectores.';
         }
 
         return null;

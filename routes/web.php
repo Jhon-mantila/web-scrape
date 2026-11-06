@@ -32,6 +32,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/scraper/ollama-models', [ScraperController::class, 'ollamaModels'])->name('scraper.ollama-models');
     Route::get('/scraper/news/{news}/preview', [ScraperController::class, 'preview'])->name('scraper.preview');
     Route::post('/scraper/news/{news}/regenerate-ai', [ScraperController::class, 'regenerateAi'])->name('scraper.regenerate-ai');
+    Route::delete('/scraper/news/{news}/ai-article', [ScraperController::class, 'discardAiPreview'])->name('scraper.discard-ai');
+    Route::delete('/scraper/news/{news}', [ScraperController::class, 'destroyNews'])->name('scraper.news.destroy');
     Route::post('/scraper/regenerate-ai/bulk', [ScraperController::class, 'bulkRegenerateAi'])->name('scraper.regenerate-ai.bulk');
     Route::get('/scraper/news/{news}/ai-generation-progress', [ScraperController::class, 'aiGenerationProgress'])
         ->name('scraper.ai-generation-progress');

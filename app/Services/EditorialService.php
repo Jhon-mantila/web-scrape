@@ -12,6 +12,7 @@ use App\ProcessScraping\Prompts\AnimeNewsWritingGuidelines;
 use App\ProcessScraping\Support\AiGenerationProgress;
 use App\ProcessScraping\Support\ArticleQualityReviewer;
 use App\ProcessScraping\Support\ArticleWordCounter;
+use App\ProcessScraping\Support\GeneratedArticleLeakGuard;
 use Illuminate\Support\Facades\Log;
 use NeuronAI\Chat\Messages\UserMessage;
 use Throwable;
@@ -22,6 +23,10 @@ use Throwable;
  */
 class EditorialService
 {
+    private const READER_SAFE_RULE = <<<'TXT'
+Regla editorial: el texto es para lectores de EsquinaAnime. No cites nombres de campos, tablas, herramientas ni IDs internos. Usa solo hechos en español natural.
+TXT;
+
     public function __construct(
         private readonly AiArticleResponseParser $parser,
         private readonly ArticleQualityReviewer $qualityReviewer,
@@ -55,6 +60,7 @@ class EditorialService
             $minWords = (int) config('services.scraper.anime_news_min_words', 350);
             $seoAnchor = $this->buildSeoAnchor($news);
             $writingRules = AnimeNewsWritingGuidelines::researchInstructions();
+            $readerRule = self::READER_SAFE_RULE;
 
             $this->logStep($news->id, 1, 4, 'Planificando outline');
             $this->setAiStatus($detail, 'planning');
@@ -64,15 +70,16 @@ Paso 1 — Planificación.
 Noticia: {$title}
 Fuente: {$source}
 Tipo de artículo: {$articleType}
-news_detail_id para investigación: {$detailId}
+Id interno para consultar_investigacion: {$detailId} (no lo escribas en el outline).
 
 Texto scrapeado (extracto):
 {$scraped}
 
-Usa la herramienta research_context con news_detail_id={$detailId} antes de planificar.
+Antes de planificar, invoca consultar_investigacion con news_detail_id={$detailId}.
 Outline y título propuesto en ESPAÑOL (SEO ≤70 caracteres).
 {$seoAnchor}
 {$writingRules}
+{$readerRule}
 Responde SOLO con un outline en Markdown: título propuesto, secciones (##) y puntos clave por sección.
 PROMPT;
 
@@ -93,11 +100,12 @@ Paso 2 — Redacción.
 Outline aprobado:
 {$outline}
 
-Usa research_context (news_detail_id={$detailId}) para datos verificados.
+Consulta consultar_investigacion (news_detail_id={$detailId}) para hechos verificados; intégralos sin mencionar la herramienta ni IDs al lector.
 Idioma: español neutro obligatorio en title, excerpt y html. NUNCA dejes el title en inglés aunque el titular ANN esté en inglés.
 Título SEO ≤70 caracteres en español. Meta/excerpt ≤155 caracteres.
 Extensión mínima del HTML: {$minWords} palabras visibles; ideal 500–800 con <h2> por sección (sin <h1>).
 {$seoAnchor}
+{$readerRule}
 Responde SOLO con JSON válido: {"title":"...","excerpt":"...","html":"<p>...</p>"}
 Sin markdown ni fences.
 PROMPT;
@@ -118,7 +126,7 @@ Paso 3 — Autocrítica.
 Borrador JSON:
 {$draftRaw}
 
-Compara con research_context (news_detail_id={$detailId}).
+Compara el borrador con la investigación (consultar_investigacion, news_detail_id={$detailId}). En feedback/issues no uses jerga de base de datos.
 Responde SOLO JSON: {"needs_refinement":true|false,"feedback":"resumen corto","issues":["..."]}
 PROMPT;
 
@@ -147,9 +155,10 @@ Feedback del editor:
 Borrador anterior:
 {$draftRaw}
 
-Investigación: usa research_context (news_detail_id={$detailId}).
+Ajusta con consultar_investigacion (news_detail_id={$detailId}) si hace falta; el JSON final es solo para lectores.
 Mantén español, SEO y mínimo {$minWords} palabras en html.
 {$seoAnchor}
+{$readerRule}
 Responde SOLO JSON: {"title":"...","excerpt":"...","html":"<p>...</p>"}
 PROMPT;
 
@@ -200,6 +209,8 @@ PROMPT;
 
             $this->setAiStatus($detail, 'completed');
 
+            $finalParts = GeneratedArticleLeakGuard::scrubParts($finalParts);
+
             return [
                 'parts' => $finalParts,
                 'raw' => implode("\n\n---\n\n", $rawParts),
@@ -231,6 +242,7 @@ PROMPT;
     ): array {
         $html = (string) ($finalParts['body_html'] ?? '');
         $wordCount = ArticleWordCounter::fromHtml($html);
+        $readerRule = self::READER_SAFE_RULE;
 
         for ($attempt = 0; $attempt < 2 && $wordCount < $minWords; $attempt++) {
             $this->logStep($newsId, 4, 4, "Expansión ({$wordCount}/{$minWords} pal.) intento ".($attempt + 1));
@@ -238,9 +250,10 @@ PROMPT;
             $expandPrompt = <<<PROMPT
 El borrador es demasiado corto ({$wordCount} palabras; mínimo {$minWords}).
 Expande el HTML desarrollando cada <h2> con varios párrafos sustantivos, sin relleno ni frases plantilla.
-Usa research_context (news_detail_id={$detailId}) solo para hechos verificables.
+Usa consultar_investigacion (news_detail_id={$detailId}) solo para hechos verificables; no nombres técnicos en el JSON.
 Mantén español neutro, título SEO ≤70 caracteres y la misma línea editorial.
 {$seoAnchor}
+{$readerRule}
 Borrador actual:
 {$finalRaw}
 
@@ -312,6 +325,7 @@ PROMPT;
 
         $badTitle = (string) ($finalParts['generated_title'] ?? '');
         $annTitle = trim((string) $news->title);
+        $readerRule = self::READER_SAFE_RULE;
 
         $fixPrompt = <<<PROMPT
 El campo "title" del JSON no es válido: {$titleError}
@@ -320,8 +334,9 @@ Título rechazado: {$badTitle}
 Reescribe el artículo con un title en ESPAÑOL neutro (SEO ≤70 caracteres), sin traducir literalmente el titular ANN.
 Titular ANN (solo referencia): {$annTitle}
 
-Usa research_context (news_detail_id={$detailId}) si hace falta.
+Consulta consultar_investigacion (news_detail_id={$detailId}) si hace falta; sin jerga técnica en el JSON.
 Mantén el html lo más posible; ajusta excerpt si conviene.
+{$readerRule}
 
 Borrador anterior:
 {$finalRaw}

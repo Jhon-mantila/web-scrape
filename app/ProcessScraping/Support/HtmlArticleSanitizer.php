@@ -290,7 +290,8 @@ class HtmlArticleSanitizer
     }
 
     /**
-     * Inserta un embed permitido si el HTML aún no contiene YouTube.
+     * Inserta el primer embed permitido si el HTML aún no contiene YouTube.
+     * {@see YoutubeExtractor::collect()} prioriza la fuente y añade investigación solo si es relevante al titular.
      *
      * @param  list<string>  $allowedEmbedUrls
      */

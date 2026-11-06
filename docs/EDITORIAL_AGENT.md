@@ -63,6 +63,6 @@ ORDER BY ai_status_updated_at DESC;
 
 ## Arquitectura (Opción A)
 
-- `App\Neuron\Agents\EditorialAgent` — proveedor Ollama, instrucciones editoriales, tool `research_context`.
+- `App\Neuron\Agents\EditorialAgent` — proveedor Ollama, instrucciones editoriales, tool `consultar_investigacion`.
 - `App\Services\EditorialService` — cuatro llamadas `chat()` (plan, borrador, crítica, refinamiento opcional) con un `setThreadId()` único por generación (requerido en Neuron 4.x).
 - Integración en `GenerateNewsAiArticleAction` cuando `EDITORIAL_AGENT_ENABLED=true` y no `--use-legacy-ai`.
