@@ -46,7 +46,7 @@ Reutilizar un `SocialVideo` original ya guardado, analizarlo fuera de Laravel y 
 - Al crear el clip, copiar las plataformas del padre como `SocialPublication` en `draft`.
 - Index lista solo originales. Show del original muestra hijos. Show del clip = ficha actual.
 - Un clip no puede ser padre de otro clip.
-- No borrar el original mientras tenga clips; borrar clips con `DeleteSocialVideosAction`.
+- No borrar el original mientras tenga clips, salvo que el usuario pida borrar original y clips juntos (`with_clips`).
 - Unique `(social_video_id, platform)` se mantiene por clip.
 
 ## Job machine

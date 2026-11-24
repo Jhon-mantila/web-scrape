@@ -6,6 +6,7 @@ use App\Models\SocialVideo;
 use App\Models\User;
 use App\VideoProcessing\Enums\VideoKind;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\Support\MakesVideoProcessingFixtures;
 use Tests\TestCase;
 
@@ -62,5 +63,34 @@ class OriginalVideoGuardsTest extends TestCase
             ->assertSessionHas('error');
 
         $this->assertDatabaseHas('social_videos', ['id' => $original->id]);
+    }
+
+    public function test_can_delete_original_and_clips_together_when_requested(): void
+    {
+        $this->fakeVideoDisks();
+
+        $user = User::factory()->create();
+        $original = $this->makeOriginalVideo($user);
+        $clipPath = 'social-clips/1/1/clip-00.mp4';
+        Storage::disk('public')->put($clipPath, 'clip-bytes');
+
+        $clip = SocialVideo::query()->create([
+            'user_id' => $user->id,
+            'parent_video_id' => $original->id,
+            'kind' => VideoKind::Clip->value,
+            'clip_index' => 0,
+            'title' => 'Clip 1',
+            'video_path' => $clipPath,
+        ]);
+
+        $this->actingAs($user)
+            ->delete(route('videos.destroy', $original), ['with_clips' => true])
+            ->assertRedirect(route('videos.index'))
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseMissing('social_videos', ['id' => $original->id]);
+        $this->assertDatabaseMissing('social_videos', ['id' => $clip->id]);
+        $this->assertFalse(Storage::disk('public')->exists($original->video_path));
+        $this->assertFalse(Storage::disk('public')->exists($clipPath));
     }
 }

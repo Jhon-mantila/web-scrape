@@ -29,16 +29,26 @@ function toggleSelected(id) {
     }
 }
 
+function clipsIn(videos) {
+    return videos.reduce((sum, video) => sum + (video.clips_count || 0), 0);
+}
+
 function deleteSelected() {
     if (selectedCount.value === 0) {
         return;
     }
 
-    if (!confirm(`¿Eliminar ${selectedCount.value} video(s)? Se borrarán videos, miniaturas y registros.`)) {
+    const chosen = props.videos.filter((video) => selected.value.includes(video.id));
+    const clipCount = clipsIn(chosen);
+    const extra = clipCount
+        ? ` También se borrarán ${clipCount} clip(s) derivado(s).`
+        : '';
+
+    if (!confirm(`¿Eliminar ${selectedCount.value} video(s)? Se borrarán videos, miniaturas y registros.${extra}`)) {
         return;
     }
 
-    router.post(route('videos.bulk-destroy'), { ids: selected.value }, {
+    router.post(route('videos.bulk-destroy'), { ids: selected.value, with_clips: clipCount > 0 }, {
         onSuccess: () => {
             selected.value = [];
         },
@@ -50,11 +60,16 @@ function deleteAll() {
         return;
     }
 
-    if (!confirm(`¿Eliminar TODO el historial (${props.videos.length} video(s))? Esta acción no se puede deshacer.`)) {
+    const clipCount = clipsIn(props.videos);
+    const extra = clipCount
+        ? ` También se borrarán ${clipCount} clip(s) derivado(s).`
+        : '';
+
+    if (!confirm(`¿Eliminar TODO el historial (${props.videos.length} video(s))? Esta acción no se puede deshacer.${extra}`)) {
         return;
     }
 
-    router.post(route('videos.bulk-destroy'), { all: true }, {
+    router.post(route('videos.bulk-destroy'), { all: true, with_clips: clipCount > 0 }, {
         onSuccess: () => {
             selected.value = [];
         },
@@ -62,11 +77,18 @@ function deleteAll() {
 }
 
 function deleteOne(video) {
-    if (!confirm(`¿Eliminar "${video.title}"? Se borrarán el video, la miniatura y sus publicaciones.`)) {
+    const clipCount = video.clips_count || 0;
+    const message = clipCount
+        ? `¿Eliminar "${video.title}" y sus ${clipCount} clip(s) derivado(s)? Se borrarán archivos y publicaciones.`
+        : `¿Eliminar "${video.title}"? Se borrarán el video, la miniatura y sus publicaciones.`;
+
+    if (!confirm(message)) {
         return;
     }
 
-    router.delete(route('videos.destroy', video.id));
+    router.delete(route('videos.destroy', video.id), {
+        data: clipCount ? { with_clips: true } : {},
+    });
 }
 </script>
 
@@ -173,7 +195,7 @@ function deleteOne(video) {
                                     class="rounded-lg border border-red-900/60 px-3 py-1.5 text-sm text-red-400 hover:bg-red-950/40"
                                     @click="deleteOne(video)"
                                 >
-                                    Eliminar
+                                    {{ video.clips_count ? 'Eliminar todo' : 'Eliminar' }}
                                 </button>
                             </div>
                         </div>

@@ -488,6 +488,17 @@ function deleteVideo() {
     router.delete(route('videos.destroy', props.video.id));
 }
 
+function deleteVideoAndClips() {
+    const clipCount = props.video.clips_count || props.video.clips?.length || 0;
+    if (!confirm(`¿Eliminar "${props.video.title}" y ${clipCount} clip(s) derivado(s)? Se borrarán archivos y publicaciones. No se puede deshacer.`)) {
+        return;
+    }
+
+    router.delete(route('videos.destroy', props.video.id), {
+        data: { with_clips: true },
+    });
+}
+
 function openSchedulePicker(event) {
     const wrap = event.currentTarget.closest('.schedule-datetime-wrap');
     const input = wrap?.querySelector('.schedule-datetime-input');
@@ -551,11 +562,20 @@ function openSchedulePicker(event) {
                     Cortar para Shorts
                 </Link>
                 <button
+                    v-if="!video.clips_count"
                     type="button"
                     class="rounded-lg border border-red-900/60 px-4 py-2 text-sm text-red-400 hover:bg-red-950/40"
                     @click="deleteVideo"
                 >
                     Eliminar video
+                </button>
+                <button
+                    v-else
+                    type="button"
+                    class="rounded-lg border border-red-700 px-4 py-2 text-sm text-red-300 hover:bg-red-950/50"
+                    @click="deleteVideoAndClips"
+                >
+                    Eliminar original y clips
                 </button>
             </div>
         </div>
@@ -657,9 +677,18 @@ function openSchedulePicker(event) {
                 <div v-if="!video.is_clip && video.clips?.length" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
                     <div class="mb-3 flex items-center justify-between gap-2">
                         <p class="text-sm font-medium text-slate-200">Clips derivados ({{ video.clips_count }})</p>
-                        <Link :href="route('videos.split.show', video.id)" class="text-xs text-violet-300 hover:text-white">
-                            Gestionar cortes
-                        </Link>
+                        <div class="flex items-center gap-3">
+                            <Link :href="route('videos.split.show', video.id)" class="text-xs text-violet-300 hover:text-white">
+                                Gestionar cortes
+                            </Link>
+                            <button
+                                type="button"
+                                class="text-xs text-red-400 hover:text-red-300"
+                                @click="deleteVideoAndClips"
+                            >
+                                Eliminar original y clips
+                            </button>
+                        </div>
                     </div>
                     <ul class="space-y-2">
                         <li v-for="clip in video.clips" :key="clip.id">

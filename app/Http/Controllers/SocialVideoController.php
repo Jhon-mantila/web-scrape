@@ -523,7 +523,7 @@ class SocialVideoController extends Controller
         $this->authorizeVideo($request, $video);
 
         try {
-            $action->execute(collect([$video]));
+            $action->execute(collect([$video]), $request->boolean('with_clips'));
         } catch (\InvalidArgumentException $e) {
             return back()->with('error', $e->getMessage());
         }
@@ -537,6 +537,7 @@ class SocialVideoController extends Controller
             'ids' => 'sometimes|array',
             'ids.*' => 'integer|exists:social_videos,id',
             'all' => 'sometimes|boolean',
+            'with_clips' => 'sometimes|boolean',
         ]);
 
         $query = SocialVideo::query()->where('user_id', $request->user()->id);
@@ -558,7 +559,7 @@ class SocialVideoController extends Controller
         }
 
         try {
-            $count = $action->execute($videos);
+            $count = $action->execute($videos, $request->boolean('with_clips'));
         } catch (\InvalidArgumentException $e) {
             return back()->with('error', $e->getMessage());
         }
