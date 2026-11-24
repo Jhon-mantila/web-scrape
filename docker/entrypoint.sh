@@ -5,7 +5,7 @@ APP_UID="${APP_UID:-1000}"
 APP_GID="${APP_GID:-1000}"
 WEB_USER="${WEB_USER:-laravel}"
 
-mkdir -p storage/app/public/featured-images storage/app/public/social-videos storage/app/public/social-thumbnails storage/framework/{cache,sessions,views} bootstrap/cache storage/logs storage/inertia-devtools
+mkdir -p storage/app/public/featured-images storage/app/public/social-videos storage/app/public/social-thumbnails storage/app/public/social-clips storage/app/private/video-jobs storage/framework/{cache,sessions,views} bootstrap/cache storage/logs storage/inertia-devtools
 
 if [ "$(id -u)" = "0" ]; then
     # Primero: Apache debe correr como el mismo UID/GID que el bind mount (evita touch() en Blade).
@@ -33,7 +33,7 @@ EOF
     chmod a+rw storage/logs/*.log 2>/dev/null || true
     chmod -R ug+rwX storage/app/public/featured-images 2>/dev/null || true
     chmod -R a+rwX storage/app/public/featured-images 2>/dev/null || true
-    chmod -R a+rwX storage/app/public/social-videos storage/app/public/social-thumbnails 2>/dev/null || true
+    chmod -R a+rwX storage/app/public/social-videos storage/app/public/social-thumbnails storage/app/public/social-clips 2>/dev/null || true
     chmod -R a+rwX storage/inertia-devtools 2>/dev/null || true
 fi
 

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\SocialPlatformAccount;
 use App\Models\SocialPublication;
 use App\Models\SocialVideo;
+use App\VideoProcessing\Enums\VideoKind;
 use App\SocialPublishing\Actions\DeleteSocialVideosAction;
 use App\SocialPublishing\Actions\GenerateSocialCaptionsAction;
 use App\SocialPublishing\Actions\GenerateSocialTitleAction;
@@ -45,7 +46,9 @@ class SocialVideoController extends Controller
     {
         $videos = SocialVideo::query()
             ->where('user_id', $request->user()->id)
+            ->whereNull('parent_video_id')
             ->with('publications')
+            ->withCount('clips')
             ->latest()
             ->get()
             ->map(fn (SocialVideo $video) => $this->videoPayload($video));
@@ -134,9 +137,9 @@ class SocialVideoController extends Controller
     {
         $this->authorizeVideo($request, $video);
 
-        $video->load('publications');
+        $video->load(['publications', 'parent', 'clips.publications']);
         $promoteDueScheduled->execute($video);
-        $video->load('publications');
+        $video->load(['publications', 'parent', 'clips.publications']);
 
         return Inertia::render('Videos/Show', [
             'video' => $this->videoPayload($video, detailed: true),
@@ -519,7 +522,11 @@ class SocialVideoController extends Controller
     {
         $this->authorizeVideo($request, $video);
 
-        $action->execute(collect([$video]));
+        try {
+            $action->execute(collect([$video]));
+        } catch (\InvalidArgumentException $e) {
+            return back()->with('error', $e->getMessage());
+        }
 
         return redirect()->route('videos.index')->with('success', 'Video eliminado.');
     }
@@ -550,7 +557,11 @@ class SocialVideoController extends Controller
             return back()->with('error', 'No hay videos para eliminar.');
         }
 
-        $count = $action->execute($videos);
+        try {
+            $count = $action->execute($videos);
+        } catch (\InvalidArgumentException $e) {
+            return back()->with('error', $e->getMessage());
+        }
 
         return redirect()->route('videos.index')->with('success', "{$count} video(s) eliminado(s) del historial.");
     }
@@ -584,8 +595,24 @@ class SocialVideoController extends Controller
             'video_size_mb' => VideoFileSize::megabytes($videoSizeBytes),
             'video_width' => $videoMetadata?->width,
             'video_height' => $videoMetadata?->height,
-            'facebook_content_type' => 'Video de página',
+            'facebook_content_type' => $videoMetadata?->contentTypeLabel() ?? 'Video de página',
             'facebook_max_video_gb' => (int) config('social.facebook.max_video_gb', 2),
+            'kind' => $video->kind ?? VideoKind::Original->value,
+            'is_clip' => $video->isClip(),
+            'parent_video_id' => $video->parent_video_id,
+            'parent' => $video->parent_video_id ? [
+                'id' => $video->parent_video_id,
+                'title' => $video->relationLoaded('parent') ? $video->parent?->title : null,
+            ] : null,
+            'clip_index' => $video->clip_index,
+            'starts_at_ms' => $video->starts_at_ms,
+            'ends_at_ms' => $video->ends_at_ms,
+            'video_duration_seconds' => $videoMetadata?->durationSeconds,
+            'clips_count' => (int) ($video->clips_count
+                ?? ($video->relationLoaded('clips') ? $video->clips->count() : 0)),
+            'clips' => $detailed && $video->relationLoaded('clips')
+                ? $video->clips->map(fn (SocialVideo $clip) => $this->clipSummaryPayload($clip))->values()
+                : [],
             'thumbnail_url' => $video->thumbnail_path
                 ? $this->publicStorageUrl($video->thumbnail_path)
                 : null,
@@ -619,6 +646,38 @@ class SocialVideoController extends Controller
                 'removable' => $p->isRemovable(),
             ])->values(),
             'max_video_label' => VideoUploadLimits::mbLabel(VideoUploadLimits::videoMaxMb()),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function clipSummaryPayload(SocialVideo $clip): array
+    {
+        $onDisk = is_string($clip->video_path)
+            && $clip->video_path !== ''
+            && str_contains($clip->video_path, '/')
+            && Storage::disk('public')->exists($clip->video_path);
+
+        return [
+            'id' => $clip->id,
+            'title' => $clip->title,
+            'clip_index' => $clip->clip_index,
+            'starts_at_ms' => $clip->starts_at_ms,
+            'ends_at_ms' => $clip->ends_at_ms,
+            'thumbnail_url' => $clip->thumbnail_path
+                ? $this->publicStorageUrl($clip->thumbnail_path)
+                : null,
+            'video_url' => $onDisk ? $this->publicStorageUrl($clip->video_path) : null,
+            'publications' => $clip->relationLoaded('publications')
+                ? $clip->publications->map(fn ($publication) => [
+                    'platform' => $publication->platform,
+                    'platform_label' => $publication->platformLabel(),
+                    'status' => $publication->status->value,
+                    'status_label' => $publication->status->label(),
+                    'status_icon' => $publication->status->icon(),
+                ])->values()
+                : [],
         ];
     }
 

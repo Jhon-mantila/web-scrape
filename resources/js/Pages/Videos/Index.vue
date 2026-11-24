@@ -151,8 +151,17 @@ function deleteOne(video) {
                             <div>
                                 <h3 class="text-lg font-semibold">{{ video.title }}</h3>
                                 <p class="mt-1 text-sm text-emerald-400">Video subido ✅</p>
+                                <p v-if="video.clips_count" class="mt-1 text-sm text-violet-300">
+                                    {{ video.clips_count }} clip(s) derivado(s)
+                                </p>
                             </div>
                             <div class="flex gap-2">
+                                <Link
+                                    :href="route('videos.split.show', video.id)"
+                                    class="rounded-lg border border-violet-700/60 px-3 py-1.5 text-sm text-violet-200 hover:bg-violet-950/40"
+                                >
+                                    Cortar
+                                </Link>
                                 <Link
                                     :href="route('videos.show', video.id)"
                                     class="rounded-lg border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800"

@@ -92,6 +92,45 @@ SOCIAL_LINKEDIN_MODEL=gemma4:12b
 
 TikTok: visible en UI como **Próximamente** (sin API en v1).
 
+### División inteligente de videos (diseñado — enfoque A)
+
+**Estado:** backend + worker + UI de cortes + publicación de clips (2026-11-23). Desde la ficha del original: **Cortar para Shorts**. Cada clip aprobado se abre como un video más: editas textos y lo envías con YouTube/Facebook/LinkedIn. Facebook Reel si el archivo es vertical. No uses intervalos iguales.
+
+Objetivo: partir un video **ya subido** en clips verticales (YouTube Shorts, Reels, TikTok) sin volver a subirlo y sin cortar en intervalos iguales. El sistema busca cortes naturales (escenas + audio). Si no puede cumplir el número pedido sin romper el contenido, propone una alternativa.
+
+**Enfoque A (confirmado):** cada clip aprobado es un `SocialVideo` hijo (`parent_video_id`), con su propio archivo y sus propias publicaciones. Se publican con YouTube/Facebook/LinkedIn existentes. El original no se duplica ni se reescribe.
+
+```
+Navegador (Videos)  →  Laravel en la VPS (jobs MySQL, UI, publicaciones)
+                              ▲
+                              │  HTTPS saliente (sin abrir puertos en el router)
+                              │
+                    Worker Python en el PC/WSL
+                    (PySceneDetect, audio, FFmpeg/NVENC, Ollama opcional)
+```
+
+Si el PC está apagado, el panel sigue funcionando. El trabajo queda `queued` o `awaiting_approval` hasta que el worker vuelva.
+
+| Capa | Responsabilidad |
+| --- | --- |
+| Laravel | Validación, persistencia, autorización, cola de jobs, clips, publicaciones |
+| Worker | Análisis, segmentación, encuadre, render. Un job a la vez. Heartbeat + claim atómico |
+
+Modos previstos: **inteligente** (default), **por escenas**, **manual**. Salida default 1080×1920. Encuadre: recorte inteligente (OpenCV, con fallback), fondo desenfocado (conserva subtítulos incrustados) o ajuste completo.
+
+No forma parte del diseño: Whisper, intervalos matemáticos iguales, FFmpeg dentro de una petición HTTP, GPU en la VPS, ni Sanctum (el worker usa token de dispositivo propio).
+
+Instalación del worker en WSL: [`workers/esquina-video-worker/README.md`](workers/esquina-video-worker/README.md).
+
+```bash
+docker exec -it laravel_app php artisan video-worker:create "PC-Jhon" --user=tu@email
+docker compose up -d --build esquina_video_worker
+```
+
+En Docker Desktop: Play en **esquina_video_worker**. El token va en `workers/esquina-video-worker/.env`.
+
+Skill de implementación: [`.cursor/skills/implementing-video-split/SKILL.md`](.cursor/skills/implementing-video-split/SKILL.md).
+
 ### Arquitectura `app/ProcessScraping/`
 
 ```

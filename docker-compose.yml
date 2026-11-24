@@ -86,6 +86,30 @@ services:
     depends_on:
       - mysql_db
 
+  # PC local: Play en Docker Desktop. No hace falta python3 a mano.
+  # En la VPS no arranques este servicio (FFmpeg va en el PC).
+  esquina_video_worker:
+    build:
+      context: ./workers/esquina-video-worker
+      network: host
+    container_name: esquina_video_worker
+    restart: unless-stopped
+    env_file:
+      - ./workers/esquina-video-worker/.env
+    environment:
+      ESQUINA_API_URL: http://laravel_app
+      ESQUINA_WORK_DIR: /tmp/esquina-video-worker
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: /app
+    volumes:
+      - ./workers/esquina-video-worker:/app
+    working_dir: /app
+    depends_on:
+      - laravel_app
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+
   searxng:
     image: searxng/searxng:latest
     container_name: searxng

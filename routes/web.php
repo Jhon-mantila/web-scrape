@@ -9,6 +9,7 @@ use App\Http\Controllers\QueueMonitorController;
 use App\Http\Controllers\ScheduledTasksController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SocialVideoController;
+use App\Http\Controllers\VideoSplitController;
 use App\Http\Controllers\ScraperController;
 use App\Http\Controllers\WordpressArticleController;
 use App\Http\Controllers\YouTubeOAuthController;
@@ -112,6 +113,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/videos', [SocialVideoController::class, 'store'])->name('videos.store');
     Route::post('/videos/bulk-destroy', [SocialVideoController::class, 'bulkDestroy'])->name('videos.bulk-destroy');
     Route::get('/videos/{video}', [SocialVideoController::class, 'show'])->name('videos.show');
+    Route::get('/videos/{video}/split', [VideoSplitController::class, 'show'])->name('videos.split.show');
+    Route::post('/videos/{video}/split', [VideoSplitController::class, 'store'])->name('videos.split.store');
+    Route::post('/videos/{video}/split/{job}/approve', [VideoSplitController::class, 'approve'])
+        ->name('videos.split.approve');
+    Route::post('/videos/{video}/split/{job}/cancel', [VideoSplitController::class, 'cancel'])
+        ->name('videos.split.cancel');
     Route::put('/videos/{video}', [SocialVideoController::class, 'update'])->name('videos.update');
     Route::delete('/videos/{video}', [SocialVideoController::class, 'destroy'])->name('videos.destroy');
     Route::post('/videos/{video}/generate-captions', [SocialVideoController::class, 'generateCaptions'])

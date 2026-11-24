@@ -325,7 +325,31 @@ function facebookVideoTooLarge() {
 }
 
 function facebookContentTypeLabel() {
-    return 'Video de página';
+    return props.video.facebook_content_type || 'Video de página';
+}
+
+function clipPublicationSummary(clip) {
+    const publications = clip.publications ?? [];
+
+    if (publications.length === 0) {
+        return 'Sin plataformas — ábrelo para publicar';
+    }
+
+    return publications
+        .map((publication) => `${publication.platform_label}: ${publication.status_label}`)
+        .join(' · ');
+}
+
+function formatMs(ms) {
+    if (ms == null) {
+        return null;
+    }
+
+    const total = Math.max(0, Math.round(ms / 1000));
+    const minutes = Math.floor(total / 60);
+    const seconds = total % 60;
+
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 function facebookSizeHint(pub) {
@@ -519,6 +543,13 @@ function openSchedulePicker(event) {
                 </button>
             </div>
             <div class="flex flex-wrap gap-2">
+                <Link
+                    v-if="!video.is_clip"
+                    :href="route('videos.split.show', video.id)"
+                    class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium hover:bg-violet-500"
+                >
+                    Cortar para Shorts
+                </Link>
                 <button
                     type="button"
                     class="rounded-lg border border-red-900/60 px-4 py-2 text-sm text-red-400 hover:bg-red-950/40"
@@ -527,6 +558,22 @@ function openSchedulePicker(event) {
                     Eliminar video
                 </button>
             </div>
+        </div>
+
+        <div
+            v-if="video.is_clip && video.parent"
+            class="mb-6 rounded-2xl border border-violet-900/40 bg-violet-950/20 px-5 py-4 text-sm text-violet-100"
+        >
+            Clip {{ (video.clip_index ?? 0) + 1 }} derivado de
+            <Link :href="route('videos.show', video.parent.id)" class="font-medium underline hover:text-white">
+                {{ video.parent.title || 'video original' }}
+            </Link>
+            <span v-if="video.starts_at_ms != null && video.ends_at_ms != null" class="ml-2 text-violet-300/80">
+                {{ formatMs(video.starts_at_ms) }}–{{ formatMs(video.ends_at_ms) }}
+            </span>
+            <p class="mt-2 text-xs text-violet-200/80">
+                Los envíos de esta ficha son de este clip. El original no se publica desde aquí.
+            </p>
         </div>
 
         <div class="grid gap-8 lg:grid-cols-[320px_1fr]">
@@ -606,6 +653,34 @@ function openSchedulePicker(event) {
                 <p v-else class="text-center text-xs text-slate-500">
                     IA desactivada para este video. Elige Ollama o DeepSeek abajo y guarda.
                 </p>
+
+                <div v-if="!video.is_clip && video.clips?.length" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                    <div class="mb-3 flex items-center justify-between gap-2">
+                        <p class="text-sm font-medium text-slate-200">Clips derivados ({{ video.clips_count }})</p>
+                        <Link :href="route('videos.split.show', video.id)" class="text-xs text-violet-300 hover:text-white">
+                            Gestionar cortes
+                        </Link>
+                    </div>
+                    <ul class="space-y-2">
+                        <li v-for="clip in video.clips" :key="clip.id">
+                            <Link
+                                :href="route('videos.show', clip.id)"
+                                class="block rounded-xl border border-slate-800 px-3 py-2 text-sm hover:bg-slate-800"
+                            >
+                                <span class="font-medium">{{ clip.title }}</span>
+                                <span
+                                    v-if="clip.starts_at_ms != null && clip.ends_at_ms != null"
+                                    class="ml-2 text-slate-500"
+                                >
+                                    {{ formatMs(clip.starts_at_ms) }}–{{ formatMs(clip.ends_at_ms) }}
+                                </span>
+                                <span class="mt-1 block text-xs text-slate-500">
+                                    {{ clipPublicationSummary(clip) }}
+                                </span>
+                            </Link>
+                        </li>
+                    </ul>
+                </div>
             </div>
 
             <form @submit.prevent="save" class="space-y-6">

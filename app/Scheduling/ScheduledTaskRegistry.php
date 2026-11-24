@@ -3,6 +3,7 @@
 namespace App\Scheduling;
 
 use App\Scheduling\Contracts\ScheduledTaskHandler;
+use App\Scheduling\Tasks\ReleaseAbandonedVideoJobsHandler;
 use App\Scheduling\Tasks\SocialArticlesPublishQueueHandler;
 use App\Scheduling\Tasks\SocialVideosPublishQueueHandler;
 use Illuminate\Support\Collection;
@@ -16,6 +17,7 @@ class ScheduledTaskRegistry
     {
         return [
             app(SocialVideosPublishQueueHandler::class),
+            app(ReleaseAbandonedVideoJobsHandler::class),
             app(SocialArticlesPublishQueueHandler::class),
         ];
     }
