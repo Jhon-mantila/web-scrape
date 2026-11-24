@@ -1,0 +1,4 @@
+# El worker usa la biblioteca estándar (urllib, subprocess, json).
+# Opcional, para detección de escenas visuales:
+# scenedetect[opencv]
+# opencv-python-headless
