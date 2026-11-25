@@ -50,6 +50,8 @@ const form = useForm({
     mode: props.defaults.mode ?? 'smart',
     framing: props.defaults.framing ?? 'smart_crop',
     fit_fill: props.defaults.fit_fill ?? 'blur',
+    fit_part_label: props.defaults.fit_part_label ?? true,
+    fit_part_label_color: props.defaults.fit_part_label_color ?? '#FFFFFF',
     fit_template: null,
 });
 
@@ -251,7 +253,10 @@ function updateEnd(segment, value) {
 }
 
 function queueAnalysis() {
-    form.post(route('videos.split.store', props.video.id), {
+    form.transform((data) => ({
+        ...data,
+        fit_part_label: data.fit_part_label ? 1 : 0,
+    })).post(route('videos.split.store', props.video.id), {
         forceFormData: true,
     });
 }
@@ -491,13 +496,27 @@ onBeforeUnmount(() => {
                                 <span class="mt-0.5 block text-xs text-slate-500">{{ option.hint }}</span>
                             </span>
                         </label>
+                        <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-800 px-4 py-3 hover:bg-slate-950">
+                            <input v-model="form.fit_part_label" type="checkbox" class="mt-1" />
+                            <span class="text-sm">
+                                <span class="font-medium text-slate-200">Texto Parte 1, 2, 3…</span>
+                                <span class="mt-0.5 block text-xs text-slate-500">
+                                    Centrado en la banda de abajo. Si hay plantilla, el texto va encima.
+                                </span>
+                            </span>
+                        </label>
+                        <label v-if="form.fit_part_label" class="flex items-center justify-between gap-3 rounded-xl border border-slate-800 px-4 py-3">
+                            <span class="text-sm text-slate-300">Color del texto</span>
+                            <input v-model="form.fit_part_label_color" type="color" class="h-9 w-14 cursor-pointer rounded border border-slate-700 bg-slate-950" />
+                        </label>
+                        <p v-if="form.errors.fit_part_label_color" class="text-sm text-red-400">{{ form.errors.fit_part_label_color }}</p>
                         <FilePicker
                             v-model="form.fit_template"
                             label="Plantilla / marco (opcional)"
                             accept="image/jpeg,image/png,image/webp"
                             choose-label="Elegir imagen"
                             empty-label="Sin plantilla — solo el fondo elegido"
-                            hint="PNG con transparencia para marco. Lo que no cubra la imagen se rellena con desenfocado, blanco o negro."
+                            hint="PNG con transparencia para marco. Lo que no cubra la imagen se rellena con desenfocado, blanco o negro. El texto Parte N queda encima."
                         />
                         <p v-if="form.errors.fit_template" class="text-sm text-red-400">{{ form.errors.fit_template }}</p>
                     </div>

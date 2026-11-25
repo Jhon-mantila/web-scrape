@@ -24,6 +24,8 @@ class QueueVideoSplitJobAction
      *     mode: string,
      *     framing: string,
      *     fit_fill?: string,
+     *     fit_part_label?: bool,
+     *     fit_part_label_color?: string,
      *     fit_template?: UploadedFile|null
      * }  $params
      */
@@ -73,6 +75,11 @@ class QueueVideoSplitJobAction
                 'fit_fill' => $params['framing'] === VideoFramingStrategy::Fit->value
                     ? ($params['fit_fill'] ?? VideoFitFill::Blur->value)
                     : null,
+                'fit_part_label' => $params['framing'] === VideoFramingStrategy::Fit->value
+                    && filter_var($params['fit_part_label'] ?? true, FILTER_VALIDATE_BOOLEAN),
+                'fit_part_label_color' => $params['framing'] === VideoFramingStrategy::Fit->value
+                    ? $this->normalizePartLabelColor($params['fit_part_label_color'] ?? '#FFFFFF')
+                    : null,
                 'output_width' => (int) (config('video_processing.output.width') ?: 1080),
                 'output_height' => (int) (config('video_processing.output.height') ?: 1920),
             ],
@@ -96,5 +103,16 @@ class QueueVideoSplitJobAction
         }
 
         return $job->fresh();
+    }
+
+    private function normalizePartLabelColor(mixed $color): string
+    {
+        $raw = ltrim((string) $color, '#');
+
+        if (preg_match('/^[A-Fa-f0-9]{6}$/', $raw) !== 1) {
+            return '#FFFFFF';
+        }
+
+        return '#'.strtoupper($raw);
     }
 }

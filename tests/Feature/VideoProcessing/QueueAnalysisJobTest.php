@@ -120,5 +120,65 @@ class QueueAnalysisJobTest extends TestCase
         $job = VideoProcessingJob::query()->first();
         $this->assertNotNull($job);
         $this->assertSame('blur', $job->params['fit_fill']);
+        $this->assertTrue($job->params['fit_part_label']);
+        $this->assertSame('#FFFFFF', $job->params['fit_part_label_color']);
+    }
+
+    public function test_fit_framing_stores_part_label_color(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->create();
+        $path = 'social-videos/original.mp4';
+        Storage::disk('public')->put($path, 'original-bytes');
+
+        $video = SocialVideo::query()->create([
+            'user_id' => $user->id,
+            'title' => 'Video largo',
+            'video_path' => $path,
+        ]);
+
+        $this->actingAs($user)->post(route('videos.split.store', $video), [
+            'target_clip_count' => 3,
+            'min_duration_seconds' => 15,
+            'max_duration_seconds' => 60,
+            'mode' => 'smart',
+            'framing' => 'fit',
+            'fit_part_label' => true,
+            'fit_part_label_color' => '#ffcc00',
+        ])->assertRedirect();
+
+        $job = VideoProcessingJob::query()->first();
+        $this->assertNotNull($job);
+        $this->assertTrue($job->params['fit_part_label']);
+        $this->assertSame('#FFCC00', $job->params['fit_part_label_color']);
+    }
+
+    public function test_fit_part_label_can_be_disabled(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->create();
+        $path = 'social-videos/original.mp4';
+        Storage::disk('public')->put($path, 'original-bytes');
+
+        $video = SocialVideo::query()->create([
+            'user_id' => $user->id,
+            'title' => 'Video largo',
+            'video_path' => $path,
+        ]);
+
+        $this->actingAs($user)->post(route('videos.split.store', $video), [
+            'target_clip_count' => 3,
+            'min_duration_seconds' => 15,
+            'max_duration_seconds' => 60,
+            'mode' => 'smart',
+            'framing' => 'fit',
+            'fit_part_label' => 0,
+        ])->assertRedirect();
+
+        $job = VideoProcessingJob::query()->first();
+        $this->assertNotNull($job);
+        $this->assertFalse((bool) $job->params['fit_part_label']);
     }
 }

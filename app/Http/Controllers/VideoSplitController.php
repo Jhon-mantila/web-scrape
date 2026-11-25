@@ -49,6 +49,8 @@ class VideoSplitController extends Controller
                 'mode' => VideoSplitMode::Smart->value,
                 'framing' => VideoFramingStrategy::SmartCrop->value,
                 'fit_fill' => VideoFitFill::Blur->value,
+                'fit_part_label' => true,
+                'fit_part_label_color' => '#FFFFFF',
             ],
             'modeOptions' => [
                 ['value' => VideoSplitMode::Smart->value, 'label' => 'Inteligente', 'hint' => 'Escenas y silencios. Puede proponer menos clips que el objetivo.'],
@@ -87,10 +89,16 @@ class VideoSplitController extends Controller
             'mode' => ['required', 'string', Rule::enum(VideoSplitMode::class)],
             'framing' => ['required', 'string', Rule::enum(VideoFramingStrategy::class)],
             'fit_fill' => ['nullable', 'string', Rule::enum(VideoFitFill::class)],
+            'fit_part_label' => 'sometimes|boolean',
+            'fit_part_label_color' => ['nullable', 'string', 'regex:/^#?[A-Fa-f0-9]{6}$/'],
             'fit_template' => 'nullable|file|mimes:jpg,jpeg,png,webp|max:10240',
         ]);
 
         $validated['fit_template'] = $request->file('fit_template');
+        $validated['fit_part_label'] = filter_var(
+            $request->input('fit_part_label', true),
+            FILTER_VALIDATE_BOOLEAN
+        );
 
         try {
             $action->execute($request->user(), $video, $validated);

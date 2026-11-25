@@ -131,6 +131,9 @@ def _render(client: LaravelClient, job: dict[str, Any], source: Path, work: Path
     template = None
     if framing == "fit" and (job.get("has_fit_template") or (params.get("fit_template_path"))):
         template = client.download_template(job_id, work / "fit-template")
+    show_part_label = framing == "fit" and _flag(params.get("fit_part_label"), default=True)
+    part_color = str(params.get("fit_part_label_color") or "#FFFFFF")
+    meta = probe_video(source)
 
     client.progress(job_id, 5, "Renderizando clips", "processing")
     for offset, segment in enumerate(segments):
@@ -150,8 +153,20 @@ def _render(client: LaravelClient, job: dict[str, Any], source: Path, work: Path
             nvenc=nvenc,
             template=template,
             fit_fill=fit_fill,
+            part_label=f"Parte {offset + 1}" if show_part_label else None,
+            part_label_color=part_color,
+            source_width=meta.width,
+            source_height=meta.height,
         )
         client.progress(job_id, 10 + int(80 * (offset + 0.5) / total), f"Subiendo clip {index}", "uploading")
         client.upload_clip(job_id, index, dest)
 
     client.complete(job_id)
+
+
+def _flag(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}

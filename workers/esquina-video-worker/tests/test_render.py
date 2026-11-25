@@ -111,6 +111,68 @@ class RenderCommandTest(unittest.TestCase):
         self.assertIn("overlay", filters)
         self.assertIn("cover.png", command)
 
+    def test_fit_part_label_is_drawn_last_over_template(self) -> None:
+        command = build_ffmpeg_command(
+            source=Path("in.mp4"),
+            dest=Path("out.mp4"),
+            start_ms=0,
+            end_ms=2000,
+            framing="fit",
+            width=1080,
+            height=1920,
+            nvenc=False,
+            template=Path("cover.png"),
+            fit_fill="blur",
+            part_label="Parte 2",
+            part_label_color="#FFFFFF",
+            source_width=1920,
+            source_height=1080,
+        )
+        filters = command[command.index("-filter_complex") + 1]
+        self.assertIn("drawtext=", filters)
+        self.assertIn("Parte 2", filters)
+        self.assertIn("0xFFFFFF", filters)
+        self.assertGreater(filters.rfind("drawtext="), filters.rfind("overlay"))
+        self.assertIn("y=1556", filters)
+        self.assertIn("x=(w-text_w)/2", filters)
+
+    def test_fit_part_label_on_solid_bars_uses_filter_complex(self) -> None:
+        command = build_ffmpeg_command(
+            source=Path("in.mp4"),
+            dest=Path("out.mp4"),
+            start_ms=0,
+            end_ms=2000,
+            framing="fit",
+            width=1080,
+            height=1920,
+            nvenc=False,
+            fit_fill="black",
+            part_label="Parte 1",
+            part_label_color="#00FFAA",
+            source_width=1920,
+            source_height=1080,
+        )
+        filters = command[command.index("-filter_complex") + 1]
+        self.assertIn("drawtext=", filters)
+        self.assertIn("Parte 1", filters)
+        self.assertIn("0x00FFAA", filters)
+        self.assertIn("[vout]", filters)
+
+    def test_smart_crop_ignores_part_label(self) -> None:
+        command = build_ffmpeg_command(
+            source=Path("in.mp4"),
+            dest=Path("out.mp4"),
+            start_ms=0,
+            end_ms=2000,
+            framing="smart_crop",
+            width=1080,
+            height=1920,
+            nvenc=False,
+            part_label="Parte 1",
+        )
+        filters = command[command.index("-vf") + 1]
+        self.assertNotIn("drawtext=", filters)
+
     def test_smart_crop_does_not_upscale_small_crops(self) -> None:
         command = build_ffmpeg_command(
             source=Path("in.mp4"),
