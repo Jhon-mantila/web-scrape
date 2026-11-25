@@ -26,4 +26,9 @@ foreach ($forced as $key => $value) {
 unset($_ENV['DB_URL'], $_SERVER['DB_URL']);
 putenv('DB_URL');
 
+if (in_array(getenv('DB_CONNECTION'), ['mysql', 'mariadb'], true)) {
+    fwrite(STDERR, "ABORTADO: PHPUnit no puede usar MySQL. Los tests van solo a sqlite :memory:.\n");
+    exit(1);
+}
+
 require __DIR__.'/../vendor/autoload.php';

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\SocialVideo;
 use App\Models\VideoProcessingJob;
 use App\Models\VideoProcessingSegment;
+use App\Models\VideoWorker;
 use App\VideoProcessing\Actions\ApproveVideoSplitJobAction;
 use App\VideoProcessing\Actions\CancelVideoSplitJobAction;
 use App\VideoProcessing\Actions\QueueVideoSplitJobAction;
@@ -32,9 +33,15 @@ class VideoSplitController extends Controller
             ->latest()
             ->first();
 
+        $heartbeatSeconds = (int) (config('video_processing.heartbeat_timeout_seconds') ?: 120);
+
         return Inertia::render('Videos/Split', [
             'video' => $this->videoSummary($video),
             'job' => $job ? $this->jobPayload($job) : null,
+            'workerOnline' => VideoWorker::query()
+                ->where('is_enabled', true)
+                ->where('last_seen_at', '>=', now()->subSeconds(max(20, (int) ($heartbeatSeconds / 4))))
+                ->exists(),
             'defaults' => [
                 'target_clip_count' => 7,
                 'min_duration_seconds' => (int) config('video_processing.clip.min_duration_seconds', 15),

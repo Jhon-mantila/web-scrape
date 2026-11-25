@@ -25,6 +25,10 @@ abstract class TestCase extends BaseTestCase
         $_ENV['DB_DATABASE'] = ':memory:';
         $_SERVER['DB_DATABASE'] = ':memory:';
 
+        putenv('DB_HOST=127.0.0.1');
+        $_ENV['DB_HOST'] = '127.0.0.1';
+        $_SERVER['DB_HOST'] = '127.0.0.1';
+
         putenv('DB_URL');
         unset($_ENV['DB_URL'], $_SERVER['DB_URL']);
 

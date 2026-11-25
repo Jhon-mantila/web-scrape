@@ -13,7 +13,6 @@ class ClaimVideoProcessingJobAction
     {
         return DB::transaction(function () use ($worker): ?VideoProcessingJob {
             $job = VideoProcessingJob::query()
-                ->where('user_id', $worker->user_id)
                 ->where('status', VideoProcessingJobStatus::Queued)
                 ->orderBy('id')
                 ->lockForUpdate()

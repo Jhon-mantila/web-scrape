@@ -59,4 +59,19 @@ class WorkerClaimJobTest extends TestCase
     {
         $this->postJson('/worker/v1/jobs/claim')->assertUnauthorized();
     }
+
+    public function test_device_worker_can_claim_job_from_another_user(): void
+    {
+        $this->fakeVideoDisks();
+
+        $owner = User::factory()->create();
+        $other = User::factory()->create();
+        $video = $this->makeOriginalVideo($owner);
+        $job = $this->queueSplitJob($owner, $video);
+        $this->makeWorker($other);
+
+        $this->postJson('/worker/v1/jobs/claim', [], $this->workerHeaders())
+            ->assertOk()
+            ->assertJsonPath('job.id', $job->id);
+    }
 }

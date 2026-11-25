@@ -29,6 +29,10 @@ const props = defineProps({
         type: Array,
         default: () => [],
     },
+    workerOnline: {
+        type: Boolean,
+        default: false,
+    },
 });
 
 const player = ref(null);
@@ -158,7 +162,7 @@ function startPoll() {
     }
 
     pollTimer = window.setInterval(() => {
-        router.reload({ only: ['job'], preserveScroll: true, preserveState: true });
+        router.reload({ only: ['job', 'workerOnline'], preserveScroll: true, preserveState: true });
     }, 2500);
 }
 
@@ -385,7 +389,8 @@ onBeforeUnmount(() => {
                         />
                     </div>
                     <p v-if="waiting" class="mt-2 text-xs text-slate-500">
-                        Si el PC está apagado, este trabajo espera aquí. No hace falta recargar.
+                        <template v-if="workerOnline">El worker del PC está en línea. Si no avanza en unos segundos, espera: está descargando o analizando el video.</template>
+                        <template v-else>No hay worker en línea. En Docker Desktop dale Play a esquina_video_worker.</template>
                     </p>
                 </div>
 

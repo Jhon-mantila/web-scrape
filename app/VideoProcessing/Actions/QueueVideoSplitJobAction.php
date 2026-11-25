@@ -73,8 +73,8 @@ class QueueVideoSplitJobAction
                 'fit_fill' => $params['framing'] === VideoFramingStrategy::Fit->value
                     ? ($params['fit_fill'] ?? VideoFitFill::Blur->value)
                     : null,
-                'output_width' => (int) config('video_processing.output.width'),
-                'output_height' => (int) config('video_processing.output.height'),
+                'output_width' => (int) (config('video_processing.output.width') ?: 1080),
+                'output_height' => (int) (config('video_processing.output.height') ?: 1920),
             ],
             'progress_percent' => 0,
             'idempotency_key' => (string) Str::uuid(),

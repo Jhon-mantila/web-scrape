@@ -55,7 +55,7 @@ Reutilizar un `SocialVideo` original ya guardado, analizarlo fuera de Laravel y 
 
 También `failed` y `cancelled`. Análisis y render son etapas del mismo job: si el PC se apaga en `awaiting_approval`, el job espera en MySQL.
 
-Claim: `UPDATE … WHERE status = queued`. Heartbeat caducado → el scheduler libera el job. Reintentos no duplican clips (`output_video_id` / índice idempotente).
+Claim: `UPDATE … WHERE status = queued` (el worker del PC es un dispositivo: puede tomar jobs de cualquier usuario de la instalación). Heartbeat caducado → el scheduler libera el job. Reintentos no duplican clips (`output_video_id` / índice idempotente).
 
 ## Segmentation
 

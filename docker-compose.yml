@@ -4,9 +4,11 @@ services:
       context: .
       network: host
     container_name: laravel_app
+    entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    restart: unless-stopped
     ports:
       - "8000:80"
     volumes:
@@ -33,6 +35,7 @@ services:
       context: .
       network: host
     container_name: laravel_scheduler
+    entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
     restart: unless-stopped
     dns:
       - 8.8.8.8
@@ -71,6 +74,8 @@ services:
       MYSQL_DATABASE: anime
     ports:
       - "3307:3306"
+    volumes:
+      - esquina_mysql_data:/var/lib/mysql
 
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
@@ -126,3 +131,6 @@ services:
       - CHOWN
       - SETGID
       - SETUID
+
+volumes:
+  esquina_mysql_data:

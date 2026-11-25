@@ -36,6 +36,7 @@ class SplitPageTest extends TestCase
                 ->has('modeOptions')
                 ->has('framingOptions')
                 ->has('fitFillOptions')
+                ->has('workerOnline')
                 ->where('defaults.fit_fill', 'blur'));
     }
 
