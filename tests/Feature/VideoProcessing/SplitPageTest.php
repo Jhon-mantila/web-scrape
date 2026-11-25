@@ -37,7 +37,10 @@ class SplitPageTest extends TestCase
                 ->has('framingOptions')
                 ->has('fitFillOptions')
                 ->has('workerOnline')
-                ->where('defaults.fit_fill', 'blur'));
+                ->has('platformOptions')
+                ->where('defaults.fit_fill', 'blur')
+                ->where('defaults.inherit_platforms', true)
+                ->where('defaults.clip_platforms.0', 'youtube'));
     }
 
     public function test_cannot_open_split_page_for_a_clip(): void

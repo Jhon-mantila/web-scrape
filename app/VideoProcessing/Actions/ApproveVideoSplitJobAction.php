@@ -7,15 +7,22 @@ use App\Models\User;
 use App\Models\VideoProcessingJob;
 use App\VideoProcessing\Enums\VideoProcessingJobStatus;
 use App\VideoProcessing\Enums\VideoSplitMode;
+use App\VideoProcessing\Support\ClipPlatformSelection;
 use InvalidArgumentException;
 
 class ApproveVideoSplitJobAction
 {
     /**
      * @param  list<array{id?: int|null, start_ms: int, end_ms: int}>  $segments
+     * @param  array{inherit_platforms?: bool, clip_platforms?: list<string>|null}  $platformParams
      */
-    public function execute(User $user, SocialVideo $video, VideoProcessingJob $job, array $segments): VideoProcessingJob
-    {
+    public function execute(
+        User $user,
+        SocialVideo $video,
+        VideoProcessingJob $job,
+        array $segments,
+        array $platformParams = [],
+    ): VideoProcessingJob {
         if ($job->user_id !== $user->id || $job->social_video_id !== $video->id) {
             throw new InvalidArgumentException('Este trabajo no pertenece a este video.');
         }
@@ -79,12 +86,25 @@ class ApproveVideoSplitJobAction
 
         $job->segments()->whereNotIn('id', $keptIds)->delete();
 
-        $job->update([
+        $payload = [
             'status' => VideoProcessingJobStatus::Queued,
             'progress_percent' => 0,
             'progress_message' => 'Segmentación aprobada. En cola para renderizar.',
             'worker_id' => null,
-        ]);
+        ];
+
+        if (array_key_exists('inherit_platforms', $platformParams) || array_key_exists('clip_platforms', $platformParams)) {
+            $params = $job->params ?? [];
+            $payload['params'] = array_merge($params, ClipPlatformSelection::fromInput(
+                $video,
+                $platformParams['inherit_platforms'] ?? ($params['inherit_platforms'] ?? true),
+                array_key_exists('clip_platforms', $platformParams)
+                    ? $platformParams['clip_platforms']
+                    : ($params['clip_platforms'] ?? null),
+            ));
+        }
+
+        $job->update($payload);
 
         return $job->fresh(['segments']);
     }

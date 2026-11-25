@@ -53,4 +53,36 @@ class ApproveSplitJobTest extends TestCase
         $this->assertTrue($job->segments()->where('index', 0)->first()?->approved);
         $this->assertSame(38000, $job->segments()->where('index', 1)->first()?->start_ms);
     }
+
+    public function test_approve_can_override_clip_platforms(): void
+    {
+        $this->fakeVideoDisks();
+
+        $user = User::factory()->create();
+        $video = $this->makeOriginalVideo($user);
+        $job = $this->queueSplitJob($user, $video);
+        $job->update(['status' => VideoProcessingJobStatus::AwaitingApproval]);
+
+        VideoProcessingSegment::query()->create([
+            'job_id' => $job->id,
+            'index' => 0,
+            'start_ms' => 0,
+            'end_ms' => 40000,
+            'source' => 'smart',
+            'approved' => false,
+        ]);
+
+        $this->actingAs($user)->post(route('videos.split.approve', [$video, $job]), [
+            'segments' => [
+                ['id' => $job->segments()->where('index', 0)->value('id'), 'start_ms' => 0, 'end_ms' => 40000],
+            ],
+            'inherit_platforms' => 0,
+            'clip_platforms' => ['linkedin'],
+            'clip_platforms_set' => 1,
+        ])->assertRedirect();
+
+        $job->refresh();
+        $this->assertFalse((bool) $job->params['inherit_platforms']);
+        $this->assertSame(['linkedin'], $job->params['clip_platforms']);
+    }
 }

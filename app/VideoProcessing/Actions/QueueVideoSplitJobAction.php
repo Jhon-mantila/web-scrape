@@ -9,6 +9,7 @@ use App\VideoProcessing\Enums\VideoFitFill;
 use App\VideoProcessing\Enums\VideoFramingStrategy;
 use App\VideoProcessing\Enums\VideoKind;
 use App\VideoProcessing\Enums\VideoProcessingJobStatus;
+use App\VideoProcessing\Support\ClipPlatformSelection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -26,6 +27,8 @@ class QueueVideoSplitJobAction
      *     fit_fill?: string,
      *     fit_part_label?: bool,
      *     fit_part_label_color?: string,
+     *     inherit_platforms?: bool,
+     *     clip_platforms?: list<string>|null,
      *     fit_template?: UploadedFile|null
      * }  $params
      */
@@ -61,6 +64,12 @@ class QueueVideoSplitJobAction
             throw new InvalidArgumentException('El archivo original no está en disco. No se volverá a pedir una subida desde aquí.');
         }
 
+        $platformSelection = ClipPlatformSelection::fromInput(
+            $video,
+            $params['inherit_platforms'] ?? true,
+            array_key_exists('clip_platforms', $params) ? $params['clip_platforms'] : null,
+        );
+
         $job = VideoProcessingJob::query()->create([
             'user_id' => $user->id,
             'social_video_id' => $video->id,
@@ -80,6 +89,8 @@ class QueueVideoSplitJobAction
                 'fit_part_label_color' => $params['framing'] === VideoFramingStrategy::Fit->value
                     ? $this->normalizePartLabelColor($params['fit_part_label_color'] ?? '#FFFFFF')
                     : null,
+                'inherit_platforms' => $platformSelection['inherit_platforms'],
+                'clip_platforms' => $platformSelection['clip_platforms'],
                 'output_width' => (int) (config('video_processing.output.width') ?: 1080),
                 'output_height' => (int) (config('video_processing.output.height') ?: 1920),
             ],

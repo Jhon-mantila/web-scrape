@@ -5,6 +5,7 @@ namespace Tests\Feature\VideoProcessing;
 use App\Models\SocialVideo;
 use App\Models\User;
 use App\Models\VideoProcessingJob;
+use App\SocialPublishing\Enums\PublicationStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -51,6 +52,8 @@ class QueueAnalysisJobTest extends TestCase
         $this->assertSame('smart', $job->params['mode']);
         $this->assertSame('smart_crop', $job->params['framing']);
         $this->assertNull($job->params['fit_fill']);
+        $this->assertTrue($job->params['inherit_platforms']);
+        $this->assertSame([], $job->params['clip_platforms']);
 
         $video->refresh();
         $this->assertSame($path, $video->video_path);
@@ -152,6 +155,39 @@ class QueueAnalysisJobTest extends TestCase
         $this->assertNotNull($job);
         $this->assertTrue($job->params['fit_part_label']);
         $this->assertSame('#FFCC00', $job->params['fit_part_label_color']);
+    }
+
+    public function test_split_job_stores_selected_clip_platforms(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->create();
+        $path = 'social-videos/original.mp4';
+        Storage::disk('public')->put($path, 'original-bytes');
+
+        $video = SocialVideo::query()->create([
+            'user_id' => $user->id,
+            'title' => 'Video largo',
+            'video_path' => $path,
+        ]);
+        $video->publications()->create(['platform' => 'youtube', 'status' => PublicationStatus::Draft]);
+        $video->publications()->create(['platform' => 'facebook_esquinaweb', 'status' => PublicationStatus::Draft]);
+
+        $this->actingAs($user)->post(route('videos.split.store', $video), [
+            'target_clip_count' => 3,
+            'min_duration_seconds' => 15,
+            'max_duration_seconds' => 60,
+            'mode' => 'smart',
+            'framing' => 'smart_crop',
+            'inherit_platforms' => true,
+            'clip_platforms' => ['youtube'],
+            'clip_platforms_set' => 1,
+        ])->assertRedirect();
+
+        $job = VideoProcessingJob::query()->first();
+        $this->assertNotNull($job);
+        $this->assertTrue($job->params['inherit_platforms']);
+        $this->assertSame(['youtube'], $job->params['clip_platforms']);
     }
 
     public function test_fit_part_label_can_be_disabled(): void

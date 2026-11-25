@@ -9,6 +9,7 @@ use App\Models\VideoWorker;
 use App\VideoProcessing\Actions\ApproveVideoSplitJobAction;
 use App\VideoProcessing\Actions\CancelVideoSplitJobAction;
 use App\VideoProcessing\Actions\QueueVideoSplitJobAction;
+use App\SocialPublishing\Enums\Platform;
 use App\VideoProcessing\Enums\VideoFitFill;
 use App\VideoProcessing\Enums\VideoFramingStrategy;
 use App\VideoProcessing\Enums\VideoProcessingJobStatus;
@@ -27,6 +28,8 @@ class VideoSplitController extends Controller
     {
         abort_unless($video->user_id === $request->user()?->id, 403);
         abort_unless($video->isOriginal(), 403);
+
+        $video->load('publications');
 
         $job = $video->processingJobs()
             ->with(['segments.outputVideo'])
@@ -51,7 +54,10 @@ class VideoSplitController extends Controller
                 'fit_fill' => VideoFitFill::Blur->value,
                 'fit_part_label' => true,
                 'fit_part_label_color' => '#FFFFFF',
+                'inherit_platforms' => true,
+                'clip_platforms' => $video->publications->pluck('platform')->values()->all(),
             ],
+            'platformOptions' => $this->platformOptions(),
             'modeOptions' => [
                 ['value' => VideoSplitMode::Smart->value, 'label' => 'Inteligente', 'hint' => 'Escenas y silencios. Puede proponer menos clips que el objetivo.'],
                 ['value' => VideoSplitMode::Scene->value, 'label' => 'Por escenas', 'hint' => 'Respeta los cortes de escena detectados.'],
@@ -91,6 +97,10 @@ class VideoSplitController extends Controller
             'fit_fill' => ['nullable', 'string', Rule::enum(VideoFitFill::class)],
             'fit_part_label' => 'sometimes|boolean',
             'fit_part_label_color' => ['nullable', 'string', 'regex:/^#?[A-Fa-f0-9]{6}$/'],
+            'inherit_platforms' => 'sometimes|boolean',
+            'clip_platforms' => 'nullable|array',
+            'clip_platforms.*' => ['string', Rule::in(Platform::values())],
+            'clip_platforms_set' => 'sometimes|boolean',
             'fit_template' => 'nullable|file|mimes:jpg,jpeg,png,webp|max:10240',
         ]);
 
@@ -99,6 +109,13 @@ class VideoSplitController extends Controller
             $request->input('fit_part_label', true),
             FILTER_VALIDATE_BOOLEAN
         );
+        $validated['inherit_platforms'] = filter_var(
+            $request->input('inherit_platforms', true),
+            FILTER_VALIDATE_BOOLEAN
+        );
+        $validated['clip_platforms'] = (
+            $request->boolean('clip_platforms_set') || $request->exists('clip_platforms')
+        ) ? ($validated['clip_platforms'] ?? []) : null;
 
         try {
             $action->execute($request->user(), $video, $validated);
@@ -127,10 +144,31 @@ class VideoSplitController extends Controller
             'segments.*.id' => 'nullable|integer',
             'segments.*.start_ms' => 'required|integer|min:0',
             'segments.*.end_ms' => 'required|integer|min:1',
+            'inherit_platforms' => 'sometimes|boolean',
+            'clip_platforms' => 'nullable|array',
+            'clip_platforms.*' => ['string', Rule::in(Platform::values())],
+            'clip_platforms_set' => 'sometimes|boolean',
         ]);
 
+        $platformParams = [];
+        if (
+            $request->exists('inherit_platforms')
+            || $request->exists('clip_platforms')
+            || $request->boolean('clip_platforms_set')
+        ) {
+            $platformParams = [
+                'inherit_platforms' => filter_var(
+                    $request->input('inherit_platforms', true),
+                    FILTER_VALIDATE_BOOLEAN
+                ),
+                'clip_platforms' => (
+                    $request->boolean('clip_platforms_set') || $request->exists('clip_platforms')
+                ) ? ($validated['clip_platforms'] ?? []) : null,
+            ];
+        }
+
         try {
-            $action->execute($request->user(), $video, $job, $validated['segments']);
+            $action->execute($request->user(), $video, $job, $validated['segments'], $platformParams);
         } catch (InvalidArgumentException $e) {
             return redirect()
                 ->route('videos.split.show', $video)
@@ -180,7 +218,24 @@ class VideoSplitController extends Controller
             'video_url' => $onDisk ? '/storage/'.ltrim($video->video_path, '/') : null,
             'video_missing' => ! $onDisk,
             'clips_count' => $video->clips()->count(),
+            'platforms' => $video->loadMissing('publications')->publications->pluck('platform')->values()->all(),
         ];
+    }
+
+    /**
+     * @return list<array{key: string, label: string, enabled: bool, coming_soon: bool}>
+     */
+    private function platformOptions(): array
+    {
+        return collect(config('social.platforms', []))
+            ->map(fn (array $cfg, string $key) => [
+                'key' => $key,
+                'label' => $cfg['label'] ?? $key,
+                'enabled' => (bool) ($cfg['enabled'] ?? false),
+                'coming_soon' => (bool) ($cfg['coming_soon'] ?? false),
+            ])
+            ->values()
+            ->all();
     }
 
     /**

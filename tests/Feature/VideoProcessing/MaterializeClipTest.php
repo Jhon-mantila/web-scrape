@@ -58,6 +58,60 @@ class MaterializeClipTest extends TestCase
         $this->assertSame(PublicationStatus::Draft, $clip->publications()->first()->status);
     }
 
+    public function test_clip_can_inherit_only_selected_parent_platforms(): void
+    {
+        $this->fakeVideoDisks();
+
+        $user = User::factory()->create();
+        $video = $this->makeOriginalVideo($user);
+        $video->publications()->create([
+            'platform' => 'facebook_esquinaweb',
+            'status' => PublicationStatus::Draft,
+            'caption_edited' => 'Caption de Facebook',
+        ]);
+        $video->publications()->firstWhere('platform', 'youtube')?->update([
+            'caption_edited' => 'Caption de YouTube',
+        ]);
+
+        $clip = $this->uploadApprovedClip($user, $video, [
+            'inherit_platforms' => true,
+            'clip_platforms' => ['facebook_esquinaweb'],
+        ]);
+
+        $this->assertSame(['facebook_esquinaweb'], $clip->publications()->pluck('platform')->all());
+        $this->assertSame('Caption de Facebook', $clip->publications()->first()?->caption_edited);
+    }
+
+    public function test_clip_can_skip_inherit_and_pick_other_platforms(): void
+    {
+        $this->fakeVideoDisks();
+
+        $user = User::factory()->create();
+        $video = $this->makeOriginalVideo($user);
+        $clip = $this->uploadApprovedClip($user, $video, [
+            'inherit_platforms' => false,
+            'clip_platforms' => ['linkedin'],
+        ]);
+
+        $this->assertSame(['linkedin'], $clip->publications()->pluck('platform')->all());
+        $this->assertNull($clip->publications()->first()?->caption_edited);
+        $this->assertSame(PublicationStatus::Draft, $clip->publications()->first()?->status);
+    }
+
+    public function test_clip_can_be_created_without_platforms(): void
+    {
+        $this->fakeVideoDisks();
+
+        $user = User::factory()->create();
+        $video = $this->makeOriginalVideo($user);
+        $clip = $this->uploadApprovedClip($user, $video, [
+            'inherit_platforms' => false,
+            'clip_platforms' => [],
+        ]);
+
+        $this->assertCount(0, $clip->publications);
+    }
+
     public function test_uploading_the_same_clip_index_twice_does_not_duplicate_social_video(): void
     {
         $this->fakeVideoDisks();
@@ -141,5 +195,35 @@ class MaterializeClipTest extends TestCase
         $this->assertSame($second->id, $clips[0]->source_job_id);
         $this->assertSame(1000, $clips[0]->starts_at_ms);
         $this->assertStringContainsString((string) $second->id, (string) $clips[0]->video_path);
+    }
+
+    /**
+     * @param  array<string, mixed>  $platformOverrides
+     */
+    private function uploadApprovedClip(User $user, SocialVideo $video, array $platformOverrides): SocialVideo
+    {
+        $job = $this->queueSplitJob($user, $video, $platformOverrides);
+        $this->makeWorker($user);
+
+        $this->postJson('/worker/v1/jobs/claim', [], $this->workerHeaders())->assertOk();
+        $job->update(['status' => VideoProcessingJobStatus::Uploading]);
+
+        VideoProcessingSegment::query()->create([
+            'job_id' => $job->id,
+            'index' => 0,
+            'start_ms' => 0,
+            'end_ms' => 45000,
+            'source' => 'smart',
+            'approved' => true,
+        ]);
+
+        $this->post('/worker/v1/jobs/'.$job->id.'/clips/0', [
+            'clip' => UploadedFile::fake()->create('clip-00.mp4', 200, 'video/mp4'),
+        ], $this->workerHeaders())->assertCreated();
+
+        return SocialVideo::query()
+            ->where('parent_video_id', $video->id)
+            ->firstOrFail()
+            ->fresh(['publications']);
     }
 }

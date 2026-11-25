@@ -8,6 +8,7 @@ use App\Models\VideoProcessingSegment;
 use App\Models\VideoWorker;
 use App\SocialPublishing\Enums\PublicationStatus;
 use App\VideoProcessing\Enums\VideoKind;
+use App\VideoProcessing\Support\ClipPlatformSelection;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -80,16 +81,16 @@ class MaterializeVideoClipAction
                     'caption_ai_model' => $parent->caption_ai_model,
                 ]);
 
-                foreach ($parent->publications as $publication) {
-                    $status = config("social.platforms.{$publication->platform}.coming_soon")
+                foreach (ClipPlatformSelection::drafts($parent, $job->params ?? []) as $draft) {
+                    $status = config("social.platforms.{$draft['platform']}.coming_soon")
                         ? PublicationStatus::Unavailable
                         : PublicationStatus::Draft;
 
                     $clip->publications()->create([
-                        'platform' => $publication->platform,
+                        'platform' => $draft['platform'],
                         'status' => $status,
-                        'caption_generated' => $publication->caption_generated,
-                        'caption_edited' => $publication->caption_edited,
+                        'caption_generated' => $draft['caption_generated'],
+                        'caption_edited' => $draft['caption_edited'],
                     ]);
                 }
 
