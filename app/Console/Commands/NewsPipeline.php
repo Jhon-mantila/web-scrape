@@ -77,6 +77,7 @@ class NewsPipeline extends Command
             'Imágenes — procesadas: '.$summary['images']['processed']
                 .' | descargadas: '.$summary['images']['downloaded']
                 .' | generadas (FLUX): '.$summary['images']['generated']
+                .' | mejoradas (Real-ESRGAN): '.($summary['images']['upscaled'] ?? 0)
                 .' | sin imagen: '.$summary['images']['skipped']
                 .' | fallidas: '.$summary['images']['failed'],
             $timings['images'] ?? null,

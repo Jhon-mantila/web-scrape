@@ -161,7 +161,7 @@ return [
 
     'featured_image' => [
         'output_format' => env('FEATURED_IMAGE_OUTPUT_FORMAT', 'webp'),
-        'output_quality' => (int) env('FEATURED_IMAGE_OUTPUT_QUALITY', 85),
+        'output_quality' => (int) env('FEATURED_IMAGE_OUTPUT_QUALITY', 92),
         'watermark_enabled' => filter_var(env('FEATURED_IMAGE_WATERMARK_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         'watermark_path' => env('FEATURED_IMAGE_WATERMARK_PATH', storage_path('app/public/Logo/esquina_anime_logo.png')),
         'watermark_position' => env('FEATURED_IMAGE_WATERMARK_POSITION', 'bottom-left'),
@@ -173,6 +173,23 @@ return [
         'watermark_mask_opacity' => (int) env('FEATURED_IMAGE_WATERMARK_MASK_OPACITY', 50),
         'watermark_mask_padding' => (int) env('FEATURED_IMAGE_WATERMARK_MASK_PADDING', 14),
         'watermark_mask_full_width' => filter_var(env('FEATURED_IMAGE_WATERMARK_MASK_FULL_WIDTH', true), FILTER_VALIDATE_BOOLEAN),
+        'upscale_enabled' => filter_var(env('FEATURED_IMAGE_UPSCALE_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+        'upscale_max_bytes' => (int) env('FEATURED_IMAGE_UPSCALE_MAX_BYTES', 307200),
+        'upscale_max_side' => (int) env('FEATURED_IMAGE_UPSCALE_MAX_SIDE', 2560),
+        'upscale_timeout' => (int) env('FEATURED_IMAGE_UPSCALE_TIMEOUT', 120),
+        'upscale_python' => env('FEATURED_IMAGE_UPSCALE_PYTHON', storage_path('app/private/realesrgan/venv/bin/python')),
+        'upscale_model_path' => env(
+            'FEATURED_IMAGE_UPSCALE_MODEL_PATH',
+            storage_path('app/private/realesrgan/realesr-general-x4v3.onnx')
+        ),
+        'upscale_model_url' => env(
+            'FEATURED_IMAGE_UPSCALE_MODEL_URL',
+            'https://huggingface.co/CoderViking/realesr-general-x4v3-onnx/resolve/c6a971706797c7502945a2b4c4274fce4900d4ab/realesr-general-x4v3.onnx'
+        ),
+        'upscale_model_sha256' => env(
+            'FEATURED_IMAGE_UPSCALE_MODEL_SHA256',
+            '1940a93ee08283a0a7286183186357b1688fe9fa8ede74604b424586aaddf112'
+        ),
     ],
 
     /*

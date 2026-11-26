@@ -32,6 +32,7 @@ class DownloadFeaturedImages extends Command
         $this->line('Procesadas: '.$summary['processed']);
         $this->line('Descargadas (scrape): '.$summary['downloaded']);
         $this->line('Generadas (FLUX): '.$summary['generated']);
+        $this->line('Mejoradas (Real-ESRGAN): '.($summary['upscaled'] ?? 0));
         $this->line('Omitidas (sin URL de imagen): '.$summary['skipped']);
         $this->line('Fallidas: '.$summary['failed']);
 

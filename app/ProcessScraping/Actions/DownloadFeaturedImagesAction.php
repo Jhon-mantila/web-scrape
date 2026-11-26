@@ -5,6 +5,7 @@ namespace App\ProcessScraping\Actions;
 use App\Models\News;
 use App\ProcessScraping\Images\FeaturedImageDownloader;
 use App\ProcessScraping\Images\FeaturedImageExtractor;
+use App\ProcessScraping\Images\FeaturedImageUpscaler;
 use App\ProcessScraping\Images\FeaturedImageWatermarker;
 use App\ProcessScraping\Images\FeaturedImageValidator;
 use Illuminate\Support\Facades\Log;
@@ -13,11 +14,14 @@ use Throwable;
 
 class DownloadFeaturedImagesAction
 {
+    private int $upscaled = 0;
+
     public function __construct(
         private readonly FeaturedImageExtractor $extractor,
         private readonly FeaturedImageDownloader $imageDownloader,
         private readonly GenerateFeaturedImagesAction $generateImages,
         private readonly FeaturedImageWatermarker $watermarker,
+        private readonly FeaturedImageUpscaler $upscaler,
     ) {}
 
     /**
@@ -25,6 +29,7 @@ class DownloadFeaturedImagesAction
      *     processed: int,
      *     downloaded: int,
      *     generated: int,
+     *     upscaled: int,
      *     success: int,
      *     skipped: int,
      *     failed: int
@@ -35,6 +40,7 @@ class DownloadFeaturedImagesAction
      */
     public function execute(int $limit, bool $skipGenerate = false, ?array $newsIds = null): array
     {
+        $this->upscaled = 0;
         $processed = 0;
         $downloaded = 0;
         $generated = 0;
@@ -64,10 +70,16 @@ class DownloadFeaturedImagesAction
             'processed' => $processed,
             'downloaded' => $downloaded,
             'generated' => $generated,
+            'upscaled' => $this->upscaledCount(),
             'success' => $downloaded + $generated,
             'skipped' => $skipped,
             'failed' => $failed,
         ];
+    }
+
+    public function upscaledCount(): int
+    {
+        return $this->upscaled;
     }
 
     private function processForNews(News $news, bool $skipGenerate): string
@@ -75,7 +87,9 @@ class DownloadFeaturedImagesAction
         $news->loadMissing('detail');
 
         if ($this->featuredImageExists($news)) {
-            return 'downloaded';
+            $this->maybeEnhanceExisting($news);
+
+            return 'skipped';
         }
 
         $scrapeResult = $this->downloadForNews($news);
@@ -106,6 +120,7 @@ class DownloadFeaturedImagesAction
 
         if ($this->featuredImageExists($news)) {
             $this->syncFeaturedImagePathFromDisk($news);
+            $this->maybeEnhanceExisting($news);
 
             return 'success';
         }
@@ -174,10 +189,8 @@ class DownloadFeaturedImagesAction
                 ->with('detail')
                 ->orderBy('id')
                 ->get()
-                ->filter(function (News $news) {
+                ->each(function (News $news) {
                     $this->purgeInvalidFeaturedImageFiles($news->id);
-
-                    return ! $this->featuredImageExists($news);
                 })
                 ->values();
         }
@@ -209,11 +222,19 @@ class DownloadFeaturedImagesAction
             'featured_image_source' => 'scraped',
         ]);
 
-        $finalPath = null;
+        $enhanced = $this->upscaler->enhanceUntilReady($path);
+        $path = $enhanced['path'];
+        $source = $enhanced['enhanced'] ? 'scraped_upscaled' : 'scraped';
 
-        if (FeaturedImageWatermarker::canProcess()) {
-            $finalPath = $this->watermarker->normalizeDownloaded($path);
+        if ($enhanced['enhanced']) {
+            $this->upscaled++;
         }
+
+        $applied = $this->applyBrandOrNormalize($path);
+        $branded = config('services.featured_image.watermark_enabled')
+            && is_string($applied)
+            && FeaturedImageValidator::isValidRelativePath($applied);
+        $finalPath = $applied;
 
         if ($finalPath === null || ! FeaturedImageValidator::isValidRelativePath($finalPath)) {
             if (FeaturedImageValidator::isValidRelativePath($path)) {
@@ -224,8 +245,10 @@ class DownloadFeaturedImagesAction
                     'gd_available' => FeaturedImageWatermarker::canProcess(),
                 ]);
                 $finalPath = $path;
+                $branded = false;
             } else {
                 $finalPath = $this->discoverFeaturedImagePathOnDisk($news->id);
+                $branded = false;
             }
         }
 
@@ -241,10 +264,78 @@ class DownloadFeaturedImagesAction
 
         $news->detail?->update([
             'featured_image_path' => $finalPath,
-            'featured_image_source' => 'scraped',
+            'featured_image_source' => $branded
+                ? $this->brandedSource($enhanced['enhanced'])
+                : $source,
         ]);
 
         return $finalPath;
+    }
+
+    private function maybeEnhanceExisting(News $news): void
+    {
+        $news->loadMissing('detail');
+        $source = $news->detail?->featured_image_source;
+
+        if ($source === 'generated') {
+            return;
+        }
+
+        $path = $this->findFeaturedImagePathForNews($news);
+
+        if ($path === null) {
+            return;
+        }
+
+        $wasUpscaled = in_array($source, ['scraped_upscaled', 'upscaled_branded'], true);
+        $result = $this->upscaler->enhanceUntilReady($path);
+        $enhanced = $result['enhanced'];
+
+        if ($enhanced) {
+            $this->upscaled++;
+            $path = $result['path'];
+        }
+
+        $needsBrand = ! $this->alreadyBranded($source) || $enhanced;
+        $applied = $needsBrand ? $this->applyBrandOrNormalize($path) : $path;
+        $branded = config('services.featured_image.watermark_enabled')
+            && is_string($applied)
+            && FeaturedImageValidator::isValidRelativePath($applied);
+        $finalPath = is_string($applied) && FeaturedImageValidator::isValidRelativePath($applied)
+            ? $applied
+            : $path;
+
+        $upscaled = $enhanced || $wasUpscaled;
+
+        $news->detail?->update([
+            'featured_image_path' => $finalPath,
+            'featured_image_source' => $branded
+                ? $this->brandedSource($upscaled)
+                : ($upscaled ? 'scraped_upscaled' : ($source ?? 'scraped')),
+        ]);
+    }
+
+    private function applyBrandOrNormalize(string $path): ?string
+    {
+        if (! FeaturedImageWatermarker::canProcess()) {
+            return FeaturedImageValidator::isValidRelativePath($path) ? $path : null;
+        }
+
+        if (config('services.featured_image.watermark_enabled')) {
+            return $this->watermarker->apply($path);
+        }
+
+        return $this->watermarker->normalizeDownloaded($path);
+    }
+
+    private function brandedSource(bool $upscaled): string
+    {
+        return $upscaled ? 'upscaled_branded' : 'scraped_branded';
+    }
+
+    private function alreadyBranded(?string $source): bool
+    {
+        return in_array($source, ['generated', 'scraped_branded', 'upscaled_branded'], true);
     }
 
     public function needsFeaturedImageDownload(News $news): bool
@@ -355,6 +446,8 @@ class DownloadFeaturedImagesAction
         $existing = $this->findFeaturedImagePathForNews($news);
 
         if ($existing !== null) {
+            $this->maybeEnhanceExisting($news);
+
             return $this->syncFeaturedImagePathFromDisk($news);
         }
 

@@ -12,6 +12,7 @@ mkdir -p \
     storage/app/public/social-thumbnails \
     storage/app/public/social-clips \
     storage/app/private/video-jobs \
+    storage/app/private/realesrgan \
     storage/framework/{cache,sessions,views} \
     bootstrap/cache \
     storage/logs \

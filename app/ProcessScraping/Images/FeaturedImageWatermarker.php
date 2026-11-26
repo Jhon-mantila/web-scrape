@@ -293,7 +293,8 @@ class FeaturedImageWatermarker
 
     private function saveImage(GdImage $image, string $path, string $format): bool
     {
-        $quality = (int) config('services.featured_image.output_quality', 85);
+        $quality = (int) config('services.featured_image.output_quality', 92);
+        $quality = max(90, min(100, $quality));
 
         return match ($format) {
             'png' => \imagepng($image, $path),

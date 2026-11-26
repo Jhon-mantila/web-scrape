@@ -11,6 +11,7 @@ use App\SocialPublishing\Support\VideoCaptionAiClientFactory;
 use App\ProcessScraping\Images\Generators\ComfyUIClient;
 use App\ProcessScraping\Support\PipelineBatchResolver;
 use App\ProcessScraping\Support\PipelineRunState;
+use App\ProcessScraping\Support\PipelineSummaryFormatter;
 use App\SendWordpress\Actions\SendPostToWordpressAction;
 
 class RunNewsPipelineAction
@@ -26,13 +27,14 @@ class RunNewsPipelineAction
         private readonly VideoCaptionAiClientFactory $clientFactory,
         private readonly PipelineBatchResolver $batchResolver,
         private readonly ApplyAnimeNewsEditorialGateAction $editorialGate,
+        private readonly PipelineSummaryFormatter $summaryFormatter,
     ) {}
 
     /**
      * @return array{
      *     scrape_news: int,
      *     details: array{processed: int, success: int, failed: int},
-     *     images: array{processed: int, downloaded: int, generated: int, success: int, skipped: int, failed: int},
+     *     images: array{processed: int, downloaded: int, generated: int, upscaled: int, success: int, skipped: int, failed: int},
      *     research: array{processed: int, success: int, skipped: int, failed: int},
      *     editorial: array{filtered: int, grouped: int, groups: int},
      *     ai: array{processed: int, success: int, failed: int, news_ids: list<int>, errors: list<array{news_id: int, message: string}>},
@@ -80,11 +82,12 @@ class RunNewsPipelineAction
         $stepStarted = microtime(true);
         $images = $this->downloadImages->execute($limit, $skipGenerate, $batchIds);
         $this->downloadImages->ensureBatchReady($batchIds, $skipGenerate);
+        $images['upscaled'] = $this->downloadImages->upscaledCount();
         $timings['images'] = microtime(true) - $stepStarted;
         $this->progressFinish(
             $progressUserId,
             'images',
-            "Imágenes {$images['downloaded']} desc. · {$images['generated']} FLUX",
+            $this->summaryFormatter->formatImagesDetail($images),
         );
 
         if (

@@ -7,6 +7,8 @@ use App\ProcessScraping\Ai\DeepSeekClient;
 use App\ProcessScraping\Ai\OllamaApiClient;
 use App\ProcessScraping\Ai\OllamaClient;
 use App\ProcessScraping\Ai\Support\AiSettings;
+use App\ProcessScraping\Images\Contracts\FeaturedImageUpscaleRunner;
+use App\ProcessScraping\Images\OnnxRuntimeFeaturedImageUpscaleRunner;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -23,6 +25,7 @@ class AppServiceProvider extends ServiceProvider
                 default => $app->make(OllamaClient::class),
             };
         });
+        $this->app->bind(FeaturedImageUpscaleRunner::class, OnnxRuntimeFeaturedImageUpscaleRunner::class);
     }
 
     /**

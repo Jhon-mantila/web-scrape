@@ -466,8 +466,9 @@ class ScraperController extends Controller
             $summary = $action->execute($limit, $skipGenerate);
 
             $message = sprintf(
-                'Descarga de imágenes: %d descargadas/generadas · %d omitidas · %d fallidas (procesadas %d).',
+                'Descarga de imágenes: %d descargadas/generadas · %d mejoradas (Real-ESRGAN) · %d omitidas · %d fallidas (procesadas %d).',
                 $summary['success'],
+                $summary['upscaled'] ?? 0,
                 $summary['skipped'],
                 $summary['failed'],
                 $summary['processed'],

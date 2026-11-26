@@ -287,6 +287,20 @@ function showExpandedFinishedDetail(run) {
     );
 }
 
+function runUpscaledCount(run) {
+    const value = run?.summary?.images?.upscaled;
+
+    return Number.isFinite(Number(value)) ? Math.max(0, Math.round(Number(value))) : 0;
+}
+
+function upscaledNotice(count) {
+    if (count === 1) {
+        return '1 imagen mejorada con Real-ESRGAN';
+    }
+
+    return `${count} imágenes mejoradas con Real-ESRGAN`;
+}
+
 </script>
 
 <template>
@@ -379,6 +393,13 @@ function showExpandedFinishedDetail(run) {
                                     <span v-if="run.status === 'running'">
                                         · {{ run.progress_percent ?? 0 }}%
                                     </span>
+                                    <span
+                                        v-if="runUpscaledCount(run) > 0"
+                                        class="ml-1 inline-flex rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-200"
+                                    >
+                                        {{ runUpscaledCount(run) }}
+                                        {{ runUpscaledCount(run) === 1 ? 'mejorada' : 'mejoradas' }}
+                                    </span>
                                 </p>
                             </button>
                             <button
@@ -397,6 +418,12 @@ function showExpandedFinishedDetail(run) {
                         >
                             <p v-if="run.message" class="mb-2 text-xs leading-relaxed text-slate-200">
                                 {{ run.message }}
+                            </p>
+                            <p
+                                v-if="runUpscaledCount(run) > 0"
+                                class="mb-2 rounded-lg border border-amber-500/40 bg-amber-950/40 px-2.5 py-1.5 text-xs font-medium text-amber-100"
+                            >
+                                {{ upscaledNotice(runUpscaledCount(run)) }}
                             </p>
 
                             <template v-if="run.status === 'running'">
@@ -451,6 +478,12 @@ function showExpandedFinishedDetail(run) {
                         >
                             <p v-if="run.message" class="text-slate-200">
                                 {{ run.message }}
+                            </p>
+                            <p
+                                v-if="runUpscaledCount(run) > 0"
+                                class="mt-2 rounded-lg border border-amber-500/40 bg-amber-950/40 px-2.5 py-1.5 text-xs font-medium text-amber-100"
+                            >
+                                {{ upscaledNotice(runUpscaledCount(run)) }}
                             </p>
                             <p
                                 v-if="runDurationLabel(run) || runTokensTotal(run) != null"

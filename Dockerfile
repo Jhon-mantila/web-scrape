@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y \
     git curl zip unzip curl libzip-dev libpng-dev libjpeg62-turbo-dev libfreetype6-dev libwebp-dev \
     libonig-dev libxml2-dev ffmpeg \
     nodejs npm \
+    python3 python3-venv python3-pip \
     && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install pdo pdo_mysql mbstring exif pcntl bcmath gd zip
 
@@ -26,6 +27,11 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 # Límites PHP para subida de videos (ver docker/php/uploads.ini)
 COPY docker/php/uploads.ini /usr/local/etc/php/conf.d/uploads.ini
+
+# Real-ESRGAN ligero (realesr-general-x4v3) para imágenes scrapeadas < 300 KB
+RUN python3 -m venv /opt/realesrgan \
+    && /opt/realesrgan/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/realesrgan/bin/pip install --no-cache-dir "numpy>=1.26,<3" "onnxruntime>=1.18,<2" "pillow>=10,<12"
 
 WORKDIR /var/www/html
 

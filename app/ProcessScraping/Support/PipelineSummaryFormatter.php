@@ -17,7 +17,7 @@ class PipelineSummaryFormatter
         }
 
         $parts[] = 'Detalles OK '.$summary['details']['success'].'/'.$summary['details']['processed'];
-        $parts[] = 'Imágenes '.$summary['images']['downloaded'].' desc. · '.$summary['images']['generated'].' FLUX';
+        $parts[] = $this->formatImagesDetail($summary['images'] ?? []);
 
         if (! ($options['skip_research'] ?? false)) {
             $parts[] = 'Research OK '.$summary['research']['success'].'/'.$summary['research']['processed'];
@@ -55,6 +55,21 @@ class PipelineSummaryFormatter
         }
 
         return 'Pipeline: '.implode(' · ', $parts);
+    }
+
+    /**
+     * @param  array<string, mixed>  $images
+     */
+    public function formatImagesDetail(array $images): string
+    {
+        $downloaded = (int) ($images['downloaded'] ?? 0);
+        $generated = (int) ($images['generated'] ?? 0);
+        $upscaled = (int) ($images['upscaled'] ?? 0);
+        $mejoradas = $upscaled === 1
+            ? '1 mejorada (Real-ESRGAN)'
+            : $upscaled.' mejoradas (Real-ESRGAN)';
+
+        return 'Imágenes '.$downloaded.' desc. · '.$generated.' FLUX · '.$mejoradas;
     }
 
     /**

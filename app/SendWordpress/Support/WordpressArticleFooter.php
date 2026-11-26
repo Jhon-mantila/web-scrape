@@ -94,7 +94,7 @@ class WordpressArticleFooter
             return '<p class="esquinaanime-image-credit"><em>Imagen ilustrativa generada para EsquinaAnime.</em></p>';
         }
 
-        if ($news->source === 'anime_news' && $source === 'scraped') {
+        if ($news->source === 'anime_news' && in_array($source, ['scraped', 'scraped_upscaled', 'scraped_branded', 'upscaled_branded'], true)) {
             return '<p class="esquinaanime-image-credit"><em>Imagen promocional vía Anime News Network.</em></p>';
         }
 

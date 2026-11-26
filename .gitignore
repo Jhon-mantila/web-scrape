@@ -20,6 +20,9 @@
 /storage/*.key
 /storage/pail
 /vendor
+/storage/app/private/realesrgan/*.onnx
+/storage/app/private/realesrgan/*.part
+/storage/app/private/realesrgan/venv/
 Homestead.json
 Homestead.yaml
 Thumbs.db
