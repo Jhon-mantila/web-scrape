@@ -92,5 +92,48 @@ class OriginalVideoGuardsTest extends TestCase
         $this->assertDatabaseMissing('social_videos', ['id' => $clip->id]);
         $this->assertFalse(Storage::disk('public')->exists($original->video_path));
         $this->assertFalse(Storage::disk('public')->exists($clipPath));
+        $this->assertFalse(Storage::disk('public')->directoryExists('social-clips/1/1'));
+        $this->assertFalse(Storage::disk('public')->directoryExists('social-clips/1'));
+    }
+
+    public function test_deleting_clip_prunes_empty_job_folder_but_keeps_sibling_clips(): void
+    {
+        $this->fakeVideoDisks();
+
+        $user = User::factory()->create();
+        $original = $this->makeOriginalVideo($user);
+        $keepPath = 'social-clips/'.$original->id.'/1/clip-00.mp4';
+        $removePath = 'social-clips/'.$original->id.'/2/clip-00.mp4';
+        Storage::disk('public')->put($keepPath, 'keep');
+        Storage::disk('public')->put($removePath, 'remove');
+
+        SocialVideo::query()->create([
+            'user_id' => $user->id,
+            'parent_video_id' => $original->id,
+            'kind' => VideoKind::Clip->value,
+            'clip_index' => 0,
+            'title' => 'Clip keep',
+            'video_path' => $keepPath,
+        ]);
+
+        $clip = SocialVideo::query()->create([
+            'user_id' => $user->id,
+            'parent_video_id' => $original->id,
+            'kind' => VideoKind::Clip->value,
+            'clip_index' => 1,
+            'title' => 'Clip remove',
+            'video_path' => $removePath,
+        ]);
+
+        $this->actingAs($user)
+            ->delete(route('videos.destroy', $clip))
+            ->assertRedirect(route('videos.index'))
+            ->assertSessionHas('success');
+
+        $this->assertFalse(Storage::disk('public')->exists($removePath));
+        $this->assertFalse(Storage::disk('public')->directoryExists('social-clips/'.$original->id.'/2'));
+        $this->assertTrue(Storage::disk('public')->exists($keepPath));
+        $this->assertTrue(Storage::disk('public')->directoryExists('social-clips/'.$original->id.'/1'));
+        $this->assertTrue(Storage::disk('public')->directoryExists('social-clips/'.$original->id));
     }
 }

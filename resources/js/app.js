@@ -5,7 +5,7 @@ import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { ZiggyVue } from '../../vendor/tightenco/ziggy';
 import PipelineRunOverlay from '@/Components/PipelineRunOverlay.vue';
 import PlatformTokenAlertBanner from '@/Components/PlatformTokenAlertBanner.vue';
-import { applyBackgroundSnapshot, setPanelCollapsed } from '@/stores/backgroundRunStore.js';
+import { applyBackgroundSnapshot } from '@/stores/backgroundRunStore.js';
 import { backgroundRunSnapshotFromPage } from '@/support/backgroundRun.js';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Esquina AI';
@@ -15,7 +15,6 @@ function syncBackgroundRunFromPage(page) {
 
     if (snapshot?.runs?.length) {
         applyBackgroundSnapshot(snapshot);
-        setPanelCollapsed(false);
     }
 }
 

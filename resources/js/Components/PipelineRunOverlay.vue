@@ -6,6 +6,7 @@ import {
     applyBackgroundSnapshot,
     hasBackgroundActivity,
     hydrateBackgroundRunFromSession,
+    hydratePanelCollapsed,
     setExpandedRunId,
     setPanelCollapsed,
 } from '@/stores/backgroundRunStore.js';
@@ -106,7 +107,7 @@ watch(
     (snapshot) => {
         if (snapshot?.runs?.length) {
             applyBackgroundSnapshot(snapshot);
-            setPanelCollapsed(false);
+            hydratePanelCollapsed();
         }
     },
     { deep: true, immediate: true },
@@ -114,7 +115,9 @@ watch(
 
 onMounted(async () => {
     hydrateBackgroundRunFromSession();
+    hydratePanelCollapsed();
     await refreshStatus();
+    hydratePanelCollapsed();
     startPolling();
 
     window.addEventListener('pipeline-run-started', onPipelineStarted);

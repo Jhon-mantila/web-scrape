@@ -1,6 +1,7 @@
 import { reactive } from 'vue';
 
 const STORAGE_KEY = 'esquina_background_runs';
+const COLLAPSED_KEY = 'esquina_background_panel_collapsed';
 
 export const backgroundRunState = reactive({
     runs: [],
@@ -35,12 +36,10 @@ export function applyBackgroundSnapshot(snapshot) {
 
     if (newlyRunning) {
         backgroundRunState.lastStartedRunId = newlyRunning.id;
-        backgroundRunState.panelCollapsed = false;
     }
 
     if (activeRunning) {
         backgroundRunState.expandedRunId = activeRunning.id;
-        backgroundRunState.panelCollapsed = false;
     } else if (backgroundRunState.expandedRunId === null) {
         const fallback = runs.find((run) => run.status === 'queued') ?? runs[runs.length - 1];
 
@@ -55,6 +54,7 @@ export function applyBackgroundSnapshot(snapshot) {
 export function registerEnqueuedRun(run, snapshot) {
     if (snapshot) {
         applyBackgroundSnapshot(snapshot);
+        setPanelCollapsed(false);
 
         return;
     }
@@ -64,7 +64,7 @@ export function registerEnqueuedRun(run, snapshot) {
         backgroundRunState.runs = [...existing, run];
         backgroundRunState.expandedRunId = run.id;
         backgroundRunState.lastStartedRunId = run.id;
-        backgroundRunState.panelCollapsed = false;
+        setPanelCollapsed(false);
 
         if (run.status === 'queued') {
             backgroundRunState.queuedCount += 1;
@@ -76,7 +76,27 @@ export function registerEnqueuedRun(run, snapshot) {
 }
 
 export function setPanelCollapsed(collapsed) {
-    backgroundRunState.panelCollapsed = collapsed;
+    backgroundRunState.panelCollapsed = Boolean(collapsed);
+
+    try {
+        sessionStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
+    } catch {
+        // ignore
+    }
+}
+
+export function hydratePanelCollapsed() {
+    try {
+        const raw = sessionStorage.getItem(COLLAPSED_KEY);
+
+        if (raw === '1') {
+            backgroundRunState.panelCollapsed = true;
+        } else if (raw === '0') {
+            backgroundRunState.panelCollapsed = false;
+        }
+    } catch {
+        // ignore
+    }
 }
 
 export function setExpandedRunId(runId) {
@@ -112,6 +132,7 @@ export function hydrateBackgroundRunFromSession() {
         const parsed = JSON.parse(raw);
 
         applyBackgroundSnapshot(parsed);
+        hydratePanelCollapsed();
 
         return parsed;
     } catch {
